@@ -1,1 +1,6 @@
+## DIRECTORIES
+bin
+.vscode
+
+## FILES
 *.csv

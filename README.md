@@ -20,3 +20,9 @@ python3 data_generator.py -n 1000 -d 3 -min 0 -max 10 -o 3Dpoints.csv
 python3 scatter_plot.py -f 3Dpoints.csv -d 3
 python3 data_generator.py -n 100 -d 3 -min 0 -max 10 | python3 scatter_plot.py -d 3
 ```
+
+## Input parser 
+
+```bash
+cat input.csv | ./bin/src/main -d 4 -l 7
+```
