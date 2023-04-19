@@ -5,47 +5,49 @@
 
 using namespace std;
 
-template <typename T> class Point {
+template <typename T> 
+class Point {
+
   private:
-    T *dims;
-    int n; 
+    T *x;
+    int d; 
   
   public:
     Point() {
-      this->dims = NULL;
-      this->n = 0;
+      this->x = NULL;
+      this->d = 0;
     }
 
-    Point(T *points, int n) {
-      this->dims = new T[n];
-      this->n = n;
+    Point(T *_x, int _d) {
+      this->x = new T[_d];
+      this->d = _d;
       
-      for (int i = 0; i < n; i++) {
-        dims[i] = points[i];
+      for (int i = 0; i < _d; i++) {
+        x[i] = _x[i];
       }
     }
 
     ~Point() {
-      delete[] dims;
+      delete[] x;
     }
 
     Point& operator= (Point const &p) {
-      if (dims) { delete[] dims; }
-      dims = new T[p.n];
+      if (x) { delete[] x; }
+      x = new T[p.d];
       
-      for (int i = 0; i < p.n; i++) {
-        dims[i] = p.dims[i];
+      for (int i = 0; i < p.d; i++) {
+        x[i] = p.x[i];
       }
-      n = p.n;
+      d = p.d;
 
       return *this;
     }
 
     friend ostream& operator<< (ostream &os, Point const &p) {
       os << "(";
-      for (int i = 0; i < p.n; i++) {
-        os << p.dims[i];
-        i == (p.n - 1) ? os << "" : os << ", ";
+      for (int i = 0; i < p.d; i++) {
+        os << p.x[i];
+        i == (p.d - 1) ? os << "" : os << ", ";
       }
       os << ")";
       return os;

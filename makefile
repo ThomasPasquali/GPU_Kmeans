@@ -4,7 +4,10 @@ CFLAGS=-Wall -Wextra
 BIN_DIR=bin
 SRC_DIR=src
 
-$(BIN_DIR)/$(SRC_DIR)/main: $(SRC_DIR)/main.cpp
+ALL_TARGETS=main
+HPP_TARGETS=input_parser.hpp point.hpp
+
+$(BIN_DIR)/$(SRC_DIR)/main: $(SRC_DIR)/main.cpp $(addprefix include/,$(HPP_TARGETS))
 	@mkdir -p $(BIN_DIR)/$(SRC_DIR)
 	@$(CC) $(CFLAGS) $< -o $@
 

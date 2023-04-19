@@ -9,32 +9,35 @@
 
 using namespace std;
 
-template <typename T> class InputParser {
+template <typename T> 
+class InputParser {
   private:
-    Point<T> *dataset;
-    int size;
+    Point<T> **dataset;
+    int d;
+    size_t n;
 
   public:
-    InputParser (istream &in, int dim, int size) {
-      this->dataset = new Point<T>[size];
-      this->size = size;
+    InputParser (istream &in, int _d, size_t _n) {
+      this->dataset = new Point<T>*[_n];
+      this->n = _n;
+      this->d = _d;
       
-      T *point = new T[dim];
-      for (int i = -1; i < size; i++) {
-        char str[MAX_LINE] = { 0 }; in >> str; 
+      T *point = new T[_d];
+      for (size_t i = 0; i <= _n; i++) {
+        char str[MAX_LINE] = { 0 };
+        in >> str;
         
-        if (i == -1) { continue; }
+        if (i == (size_t)0) { continue; }
         if (!str[0]) { break; }
         
         int j = 0;
         char *tok = strtok(str, SEPARATOR);
-        while (tok && j < dim) {
+        while (tok && j < _d) {
           point[j++] = atof(tok);
           tok = strtok(NULL, SEPARATOR);
         }
 
-        Point<T> p(point, dim);
-        dataset[i] = p;
+        dataset[i - 1] = new Point<T>(point, _d);
       }
       
       delete[] point;
@@ -44,16 +47,16 @@ template <typename T> class InputParser {
       delete[] dataset;
     }
 
-    Point<T> *get_dataset();
-    int       get_dataset_size();
+    Point<T> *get_dataset () { return dataset; }
+    size_t get_dataset_size() { return n; };
 
     friend ostream& operator<< (ostream &os, InputParser const& p) {
       os << "DATASET={";
-      for (int i = 0; i < p.size; i++) {
-        os << p.dataset[i]; 
-        i == (p.size - 1) ? os << "" : os << ", ";
+      for (size_t i = 0; i < p.n; i++) {
+        os << *p.dataset[i]; 
+        i == (p.n - 1) ? os << "" : os << ", ";
       }
-      os << "}";
+      os << "}" << endl << "D = " << p.d << " N = " << p.n << endl;
       return os;
     }
 };

@@ -8,12 +8,12 @@ using namespace std;
 #include "../include/input_parser.hpp"
 
 int main(int argc, char **argv) {
-  cxxopts::Options options("MyProgram", "One line description of MyProgram");
+  cxxopts::Options options("gpukmeans", "gpukmeans is an implementation of the K-means algorithm that uses a GPU");
   
   options.add_options()
-    ("d,dim",  "Number of dimensions of a point", cxxopts::value<int>())
     ("h,help", "Print usage")
-    ("l,size", "Number of points",                cxxopts::value<int>());
+    ("d,dimensions",  "Number of dimensions of a point",  cxxopts::value<int>())
+    ("n,n-samples", "Number of points",                   cxxopts::value<int>());
 
   auto result = options.parse(argc, argv);
 
@@ -22,19 +22,16 @@ int main(int argc, char **argv) {
     exit(0);
   }
 
-  int dim  = 0, 
-      size = 0;
+  int d = 0, n = 0;
   try {
-    dim  = result["dim"].as<int>();
-    size = result["size"].as<int>();
+    d  = result["dimensions"].as<int>();
+    n = result["n-samples"].as<int>();
   } catch(...) {
     cerr << "Missing args!" << endl;
     exit(1);
   }
-
-  cout << "DIM = " << dim << " SIZE = " << size << endl;
   
-  InputParser<DATA_TYPE> input(cin, dim, size);
+  InputParser<DATA_TYPE> input(cin, d, n);
   cout << input << endl;
   
   return 0;

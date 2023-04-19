@@ -24,5 +24,5 @@ python3 data_generator.py -n 100 -d 3 -min 0 -max 10 | python3 scatter_plot.py -
 ## Input parser 
 
 ```bash
-cat input.csv | ./bin/src/main -d 4 -l 7
+cat 3Dpoints.csv | ./bin/src/main -d 3 -l 1000
 ```

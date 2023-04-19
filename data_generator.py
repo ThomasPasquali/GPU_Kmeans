@@ -9,6 +9,7 @@ argParser.add_argument("-min", "--min-value", help="Lower bound for the generate
 argParser.add_argument("-max", "--max-value", help="Upper bound for the generated values", type=float, required=False, default=100)
 argParser.add_argument("-s", "--seed", help="The seed to user for rng", type=int, required=False, default=None)
 argParser.add_argument("-o", "--out-filename", help="The file to write to", type=str, required=False, default=None)
+argParser.add_argument("-c", "--cluster-col", help="Include cluster column", type=bool, required=False, default=False)
 args = argParser.parse_args()
 
 random.seed(args.seed)
@@ -21,10 +22,19 @@ if args.min_value > args.max_value:
 # print("args=%s" % args)
 
 data = [] # np.random.rand(args.n_samples, args.dimensions)
-for i in range(args.n_samples):
-  data.append([0] + [random.uniform(args.min_value, args.max_value) for j in range(args.dimensions)])
+if args.cluster_col:
+  for i in range(args.n_samples):
+    data.append([0] + [random.uniform(args.min_value, args.max_value) for j in range(args.dimensions)])
+else:
+  for i in range(args.n_samples):
+    data.append([random.uniform(args.min_value, args.max_value) for j in range(args.dimensions)])
 
-columns = ['cluster'] + [f"d{i}" for i in range(args.dimensions)]
+columns = None
+if args.cluster_col:
+  columns = ['cluster'] + [f"d{i}" for i in range(args.dimensions)]
+else:
+  columns = [f"d{i}" for i in range(args.dimensions)]
+
 df = pd.DataFrame(data, columns=columns)
 
 if args.out_filename == None:
