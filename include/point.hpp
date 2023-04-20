@@ -4,6 +4,8 @@
 #include <iostream>
 #include <iomanip>
 
+#include "errors.hpp"
+
 using namespace std;
 
 template <typename T> 
@@ -11,8 +13,7 @@ class Point {
 
   private:
     T *x;
-    int d;
-    int cluster;
+    unsigned int cluster, d;
   
   public:
     Point() {
@@ -21,20 +22,30 @@ class Point {
       this->cluster = 0;
     }
 
-    Point(T *_x, int _d): cluster(0) {
+    Point(T *_x, unsigned int _d): cluster(0), d(_d) {
       this->x = new T[_d];
-      this->d = _d;
-      
-      for (int i = 0; i < _d; i++) {
+      for (unsigned int i = 0; i < _d; i++) {
         x[i] = _x[i];
       }
     }
 
-    Point(T *_x, int _d, int _cluster): cluster(_cluster) {
-      this(_x, _d);
+    Point(Point<T>* const p): cluster(p->cluster), d(p->d) {
+      x = new T[d];
+      for (unsigned int i = 0; i < d; i++) {
+        x[i] = p->x[i];
+      }
     }
 
     int getCluster () { return cluster; }
+    void setCluster (unsigned int c) { cluster = c; }
+
+    T get(unsigned int i) {
+      if (i >= d) {
+        printErrDesc(EXIT_POINT_IOB);
+        exit(EXIT_POINT_IOB);
+      }
+      return x[i];
+    }
 
     ~Point() {
       delete[] x;
@@ -44,7 +55,7 @@ class Point {
       if (x) { delete[] x; }
       x = new T[p.d];
       
-      for (int i = 0; i < p.d; i++) {
+      for (unsigned int i = 0; i < p.d; i++) {
         x[i] = p.x[i];
       }
       d = p.d;
@@ -52,9 +63,17 @@ class Point {
       return *this;
     }
 
+    bool operator== (const Point<T> &p) const {
+      if (d != p.d) return false;
+      for (unsigned int i = 0; i < d; ++i)
+        if (x[i] != p.x[i])
+          return false;
+      return true;
+    }
+
     friend ostream& operator<< (ostream &os, Point const &p) {
       os << setw(9) << p.cluster;
-      for (int i = 0; i < p.d; i++) {
+      for (unsigned int i = 0; i < p.d; i++) {
         os << setw(9) << setprecision(5) << p.x[i];
       }
       return os;

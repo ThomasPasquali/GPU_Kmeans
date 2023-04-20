@@ -44,10 +44,11 @@ class InputParser {
     }
 
     ~InputParser() {
+      for (size_t i = 0; i < n; ++i) delete dataset[i];
       delete[] dataset;
     }
 
-    Point<T> *get_dataset () { return dataset; }
+    Point<T> **get_dataset () { return dataset; }
     size_t get_dataset_size() { return n; };
 
     friend ostream& operator<< (ostream &os, InputParser const& p) {
@@ -55,7 +56,7 @@ class InputParser {
       size_t count = 0;
       os << "i  cluster";
       for (int i = 0; i < p.d; ++i) {
-        char s[7];
+        char s[W];
         sprintf(s, "d%d", i);
         os << setw(W) << s;
       }
