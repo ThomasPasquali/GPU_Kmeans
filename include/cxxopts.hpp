@@ -1451,7 +1451,6 @@ CXXOPTS_IGNORE_WARNING("-Wnull-dereference")
 CXXOPTS_DIAGNOSTIC_POP
 #endif
 
-  // TODO: maybe default options should count towards the number of arguments
   CXXOPTS_NODISCARD
   bool
   has_default() const noexcept

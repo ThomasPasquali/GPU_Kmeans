@@ -15,4 +15,5 @@ if args.dimensions == 2:
 elif args.dimensions == 3:
   fig = px.scatter_3d(df, x=df.columns[1], y=df.columns[2], z=df.columns[3], color='cluster')
 
+print(df)
 fig.show()

@@ -51,12 +51,20 @@ class InputParser {
     size_t get_dataset_size() { return n; };
 
     friend ostream& operator<< (ostream &os, InputParser const& p) {
-      os << "DATASET={";
-      for (size_t i = 0; i < p.n; i++) {
-        os << *p.dataset[i]; 
-        i == (p.n - 1) ? os << "" : os << ", ";
+      const int W = 9;
+      size_t count = 0;
+      os << "i  cluster";
+      for (int i = 0; i < p.d; ++i) {
+        char s[7];
+        sprintf(s, "d%d", i);
+        os << setw(W) << s;
       }
-      os << "}" << endl << "D = " << p.d << " N = " << p.n << endl;
+      os << endl;
+      for (size_t i = 0; i < p.n; ++i) {
+        os << setw(-W) << (count++) << setw(W) << *p.dataset[i] << endl; 
+        // i == (p.n - 1) ? os << "" : os << ", ";
+      }
+      os << endl << "[" << p.n << " rows x " << p.d << " columns]" << endl;
       return os;
     }
 };

@@ -2,6 +2,7 @@
 #define __POINT_H__
 
 #include <iostream>
+#include <iomanip>
 
 using namespace std;
 
@@ -10,15 +11,17 @@ class Point {
 
   private:
     T *x;
-    int d; 
+    int d;
+    int cluster;
   
   public:
     Point() {
       this->x = NULL;
       this->d = 0;
+      this->cluster = 0;
     }
 
-    Point(T *_x, int _d) {
+    Point(T *_x, int _d): cluster(0) {
       this->x = new T[_d];
       this->d = _d;
       
@@ -26,6 +29,12 @@ class Point {
         x[i] = _x[i];
       }
     }
+
+    Point(T *_x, int _d, int _cluster): cluster(_cluster) {
+      this(_x, _d);
+    }
+
+    int getCluster () { return cluster; }
 
     ~Point() {
       delete[] x;
@@ -44,12 +53,10 @@ class Point {
     }
 
     friend ostream& operator<< (ostream &os, Point const &p) {
-      os << "(";
+      os << setw(9) << p.cluster;
       for (int i = 0; i < p.d; i++) {
-        os << p.x[i];
-        i == (p.d - 1) ? os << "" : os << ", ";
+        os << setw(9) << setprecision(5) << p.x[i];
       }
-      os << ")";
       return os;
     }
 };
