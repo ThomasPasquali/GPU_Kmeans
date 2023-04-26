@@ -11,7 +11,7 @@ ALL_TARGETS=main
 HPP_TARGETS=input_parser.hpp point.hpp errors.hpp
 CUDA_LIBS=utils.cu kmeans.cu
 
-$(BIN_DIR)/$(SRC_DIR)/main: $(SRC_DIR)/main.cu $(addprefix lib/cuda/,$(CUDA_LIBS)) # $(addprefix include/,$(HPP_TARGETS))
+$(BIN_DIR)/$(SRC_DIR)/main: $(SRC_DIR)/main.cu $(addprefix lib/cuda/,$(CUDA_LIBS)) #$(addprefix include/,$(HPP_TARGETS))
 	@ mkdir -p $(BIN_DIR)/$(SRC_DIR)
 	@ $(CUDAC) $(CUDA_FLAGS) $^ -o $@
 

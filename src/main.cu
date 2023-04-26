@@ -1,15 +1,13 @@
 #include <stdio.h>
 #include <vector>
 #include <algorithm>
-#include <random>
 
+#include "../include/common.h"
 #include "../include/cxxopts.hpp"
 #include "../include/input_parser.hpp"
 #include "../include/errors.hpp"
 #include "../lib/cuda/utils.cuh"
-#include "../lib/cuda/kmeans.cuh"
-
-#define DATA_TYPE float
+#include "../lib/cuda/kmeans.h"
 
 #define ARG_DIMENSIONS  0
 #define ARG_SAMPLES     1
@@ -18,8 +16,6 @@
 const char* ARG_STR[4] = {"dimensions", "n-samples", "clusters", "maxiter"};
 
 using namespace std;
-
-__device__ DATA_TYPE* d_points;
 
 cxxopts::ParseResult args;
 int getArg_u (int arg) {
@@ -40,9 +36,6 @@ int getArg_u (int arg) {
     exit(EXIT_ARGS);
   }
 } */
-
-random_device rd;
-mt19937 rng(rd());
 
 int main(int argc, char **argv) {
   // Read input args
@@ -68,7 +61,7 @@ int main(int argc, char **argv) {
   size_t        maxiter = getArg_u(ARG_MAXITER);
   
   InputParser<DATA_TYPE> input(cin, d, n);
-  cout << input << endl;
+  if (DEBUG_PRINTS) cout << input << endl;
 
   // Check devices
   int deviceCount = 0;
@@ -81,7 +74,7 @@ int main(int argc, char **argv) {
   if (deviceCount == 0) {
     printErrDesc(EXIT_CUDA_DEV);
     exit(EXIT_CUDA_DEV);
-  } else {
+  } else if (DEBUG_PRINTS) {
     printf("Detected %d CUDA Capable device(s)\n", deviceCount);
   }
 
@@ -89,56 +82,11 @@ int main(int argc, char **argv) {
   cudaSetDevice(dev); // Use device 0 by default
   cudaDeviceProp deviceProp;
   cudaGetDeviceProperties(&deviceProp, dev);
-  // describeDevice(dev, deviceProp);
+  if (DEBUG_PRINTS) describeDevice(dev, deviceProp);
 
-  // K-means variables setup
-  uint64_t iter = 0, i;
-  DATA_TYPE* h_points;
-  CHECK_CUDA_ERROR(cudaHostAlloc(&h_points, n * d * sizeof(DATA_TYPE), cudaHostAllocDefault));
-  for (i = 0; i < n; ++i) {
-    for (unsigned int j = 0; j < d; ++j) {
-      h_points[i * d + j] = input.get_dataset()[i]->get(j);
-    }
-  }
+  Kmeans kmeans(n, d, k, input.get_dataset());
+  // kmeans.run(maxiter);
+  kmeans.to_csv(cout);
 
-  uniform_int_distribution<int> random_int(0, n - 1);
-  DATA_TYPE* h_centers;
-  CHECK_CUDA_ERROR(cudaHostAlloc(&h_centers, k * d * sizeof(DATA_TYPE), cudaHostAllocDefault));
-  i = 0;
-  // Add k random centers sampled form points
-  vector<Point<DATA_TYPE>*> usedPoints;
-  Point<DATA_TYPE>* centers[k];
-  while (i < k) {
-    Point<DATA_TYPE>* p = input.get_dataset()[random_int(rng)];
-    bool found = false;
-    for (auto p1 : usedPoints) {
-      if ((*p1) == (*p)) { // FIXME Is it better use some min distance??
-        found = true;
-        break;
-      }
-    }
-    if (!found) {
-      for (unsigned int j = 0; j < d; ++j) {
-        h_centers[i * d + j] = p->get(j);
-      }
-      centers[i] = new Point<DATA_TYPE>(p);
-      usedPoints.push_back(p);
-      ++i;
-    }
-  }
-  cout << endl << "Centers" << endl; for (i = 0; i < k; ++i) cout << *(centers[i]) << endl;
-
-  CHECK_CUDA_ERROR(cudaMalloc(&d_points, n * d * sizeof(DATA_TYPE)));
-  
-
-  // K-means algoritm
-  while (iter++ < maxiter) { // && !cmpCenters()) {
-    
-  }
-
-
-  // Free memory
-  cudaFreeHost(h_points);
-  cudaFreeHost(h_centers);
   return 0;
 }

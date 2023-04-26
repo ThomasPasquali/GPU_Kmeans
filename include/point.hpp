@@ -4,7 +4,7 @@
 #include <iostream>
 #include <iomanip>
 
-#include "errors.hpp"
+// FIXME multiple definition of `printErrDesc(int)', first defined here #include "errors.hpp"
 
 using namespace std;
 
@@ -41,8 +41,8 @@ class Point {
 
     T get(unsigned int i) {
       if (i >= d) {
-        printErrDesc(EXIT_POINT_IOB);
-        exit(EXIT_POINT_IOB);
+        // FIXME printErrDesc(EXIT_POINT_IOB); exit(EXIT_POINT_IOB);
+        exit(3);
       }
       return x[i];
     }

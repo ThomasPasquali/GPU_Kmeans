@@ -1,7 +1,7 @@
 #ifndef __ERRORS__
 #define __ERRORS__
 
-#include<stdio.h>
+#include <stdio.h>
 
 #define EXIT_ARGS       1
 #define EXIT_CUDA_DEV   2
