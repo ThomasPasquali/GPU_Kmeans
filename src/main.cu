@@ -61,7 +61,7 @@ int main(int argc, char **argv) {
   size_t        maxiter = getArg_u(ARG_MAXITER);
   
   InputParser<DATA_TYPE> input(cin, d, n);
-  if (DEBUG_PRINTS) cout << input << endl;
+  if (DEBUG_INPUT_DATA) cout << input << endl;
 
   // Check devices
   int deviceCount = 0;
@@ -74,7 +74,7 @@ int main(int argc, char **argv) {
   if (deviceCount == 0) {
     printErrDesc(EXIT_CUDA_DEV);
     exit(EXIT_CUDA_DEV);
-  } else if (DEBUG_PRINTS) {
+  } else if (DEBUG_DEVICE) {
     printf("Detected %d CUDA Capable device(s)\n", deviceCount);
   }
 
@@ -82,10 +82,10 @@ int main(int argc, char **argv) {
   cudaSetDevice(dev); // Use device 0 by default
   cudaDeviceProp deviceProp;
   cudaGetDeviceProperties(&deviceProp, dev);
-  if (DEBUG_PRINTS) describeDevice(dev, deviceProp);
-
+  if (DEBUG_DEVICE) describeDevice(dev, deviceProp);
+  
   Kmeans kmeans(n, d, k, input.get_dataset());
-  // kmeans.run(maxiter);
+  kmeans.run(maxiter);
   kmeans.to_csv(cout);
 
   return 0;

@@ -4,3 +4,4 @@ bin
 
 ## FILES
 *.csv
+!3Dpoints.csv
