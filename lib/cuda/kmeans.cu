@@ -71,9 +71,29 @@ printf("off: %4lu, d: %-5d val: %.3f shfl: %.3f\n", offset, threadIdx.x, distanc
   uint32_t d_i = threadIdx.y;
   uint32_t warpid = (threadIdx.x + blockDim.x * (threadIdx.y + blockDim.y * threadIdx.z)) % 32;
   
-  // aggr_distances[(blockIdx.x * gridDim.y * blockDim.x) + (blockIdx.y * blockDim.x)]
-  // printf("p: %4lu, c: %4lu, d: %4lu warp: %4lu\n", point_i, center_i, d_i, warpid);
+  aggr_distances[(blockIdx.x * gridDim.y * blockDim.x) + (blockIdx.y * blockDim.x)]
+  printf("p: %4lu, c: %4lu, d: %4lu warp: %4lu\n", point_i, center_i, d_i, warpid);
 } */
+
+__global__ void compute_centers(DATA_TYPE* centers, DATA_TYPE* points, uint32_t* points_clusters, uint64_t* clusters_len) {
+  uint64_t cluster_offset = blockIdx.x * blockDim.x + threadIdx.x;
+  uint64_t point_offset   = blockIdx.y * blockDim.x + threadIdx.x;
+
+  DATA_TYPE sum = points[point_offset];
+  
+  if (blockIdx.y >= clusters_len[blockIdx.x]) { return; }
+  
+  if (blockIdx.x == 1 && blockIdx.y == 0)  printf("cl: %d p: %d d: %d p: %f sum: %f\n", blockIdx.x, blockIdx.y, threadIdx.x, points[point_offset], sum);
+  
+  for (int i = next_pow_2(blockDim.x); i > 0; i /= 2)
+    sum += __shfl_down_sync(SHFL_MASK, sum, i);
+
+  if (blockIdx.x == 1 && blockIdx.y == 0) printf("blk: %d %d %d, sum: %.3f\n", blockIdx.x, blockIdx.y, threadIdx.x, sum);
+
+  if (threadIdx.x == 0) {
+    centers[(blockIdx.x * blockDim.x) + blockIdx.y] = sum;
+  }
+}
 
 /* Kmeans class */
 void Kmeans::initCenters (Point<DATA_TYPE>** points) {
@@ -144,10 +164,13 @@ bool Kmeans::run (uint64_t maxiter) {
   CHECK_CUDA_ERROR(cudaMalloc(&d_points_clusters, n * sizeof(uint32_t)));
   uint32_t* h_points_clusters;
   CHECK_CUDA_ERROR(cudaMallocHost(&h_points_clusters, n * sizeof(uint32_t)));
-  uint64_t* clusters_len;
-  CHECK_CUDA_ERROR(cudaMallocHost(&clusters_len, k * sizeof(uint64_t)));
+  uint64_t* h_clusters_len;
+  CHECK_CUDA_ERROR(cudaMallocHost(&h_clusters_len, k * sizeof(uint64_t)));
+  uint64_t* d_clusters_len;
+  CHECK_CUDA_ERROR(cudaMalloc(&d_clusters_len, k * sizeof(uint64_t)));
 
   uint64_t iter = 0;
+  uint64_t max_cluster_len = 0;
   dim3 dist_grid_dim(n, k);
   dim3 argmin_block_dim(k, d);
   while (iter++ < maxiter) { // && !cmpCenters()) { 
@@ -162,7 +185,7 @@ bool Kmeans::run (uint64_t maxiter) {
         printf("%u %u -> %.3f\n", i, j, tmp[i * k + j]);
     cout << endl;
 
-    memset(clusters_len, 0, k * sizeof(uint64_t));
+    memset(h_clusters_len, 0, k * sizeof(uint64_t));
     for (size_t i = 0; i < n; i++) {
       cub::KeyValuePair<int32_t, DATA_TYPE> *d_argmin = NULL;
       CHECK_CUDA_ERROR(cudaMalloc(&d_argmin, sizeof(int32_t) + sizeof(DATA_TYPE)));
@@ -184,18 +207,28 @@ bool Kmeans::run (uint64_t maxiter) {
       CHECK_CUDA_ERROR(cudaDeviceSynchronize());
 
       printf("Argmin point %lu: %d %.3f\n", i, argmin_idx, argmin_val);
-      ++clusters_len[argmin_idx];
+      ++h_clusters_len[argmin_idx];
+      max_cluster_len = max_cluster_len > h_clusters_len[argmin_idx] ? max_cluster_len : h_clusters_len[argmin_idx];
       h_points_clusters[i] = argmin_idx;
     }
 
-    CHECK_CUDA_ERROR(cudaMemcpy(&d_points_clusters, &h_points_clusters,  n * sizeof(uint32_t), cudaMemcpyHostToDevice));
+    CHECK_CUDA_ERROR(cudaMemcpy(d_points_clusters, h_points_clusters, n * sizeof(uint32_t), cudaMemcpyHostToDevice));
+    CHECK_CUDA_ERROR(cudaMemcpy(d_clusters_len, h_clusters_len, k * sizeof(uint64_t), cudaMemcpyHostToDevice));
     
-
-
-    /* if (DEBUG_KERNELS_INVOKATION) printf("find_nearest_centers: Grid (%lu, %d, %d), Block (%d, %d, %d), Shared %lu\n", n, 1, 1, argmin_block_dim.x, argmin_block_dim.y, argmin_block_dim.z, n * k);
-    find_nearest_centers<<<n, argmin_block_dim, n * k>>>(d_distances, d_points_clusters);
+    dim3 centers_grid_dim(k, max_cluster_len);
+    if (DEBUG_KERNELS_INVOKATION) printf("compute_distances: Grid (%d, %d, %d), Block (%d, %d, %d)\n", centers_grid_dim.x, centers_grid_dim.y, centers_grid_dim.z, d, 1, 1);
+    compute_centers<<<centers_grid_dim, d>>>(d_centers, d_points, d_points_clusters, d_clusters_len);
     CHECK_LAST_CUDA_ERROR();
-    CHECK_CUDA_ERROR(cudaDeviceSynchronize()); */
+
+    DATA_TYPE tmp2[d * k];
+    CHECK_CUDA_ERROR(cudaMemcpy(tmp2, d_centers, d * k * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost));
+    cout << endl << "CENTERS" << endl;
+    for (uint32_t i = 0; i < k; ++i) {
+      for (uint32_t j = 0; j < d; ++j)
+        printf("%.3f, ", tmp2[i * d + j]);
+      cout << endl;
+    }
+    cout << endl;
   }
 
   CHECK_CUDA_ERROR(cudaFree(d_distances));
