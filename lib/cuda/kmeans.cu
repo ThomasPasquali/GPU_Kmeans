@@ -99,6 +99,7 @@ __global__ void compute_centers(DATA_TYPE* centers, DATA_TYPE* points, uint32_t*
 void Kmeans::initCenters (Point<DATA_TYPE>** points) {
   uniform_int_distribution<int> random_int(0, n - 1);
   CHECK_CUDA_ERROR(cudaHostAlloc(&h_centers, CENTERS_BYTES, cudaHostAllocDefault));
+  CHECK_CUDA_ERROR(cudaHostAlloc(&h_last_centers, CENTERS_BYTES, cudaHostAllocDefault));
   unsigned int i = 0;
   vector<Point<DATA_TYPE>*> usedPoints;
   Point<DATA_TYPE>* centers[k];
@@ -132,37 +133,42 @@ void Kmeans::initCenters (Point<DATA_TYPE>** points) {
   CHECK_CUDA_ERROR(cudaMemcpy(d_centers, h_centers, CENTERS_BYTES, cudaMemcpyHostToDevice));
 }
 
-Kmeans::Kmeans (size_t _n, unsigned int _d, unsigned int _k, Point<DATA_TYPE>** points)
+Kmeans::Kmeans (size_t _n, unsigned int _d, unsigned int _k, Point<DATA_TYPE>** _points)
     : n(_n), d(_d), k(_k),
     POINTS_BYTES(_n * _d * sizeof(DATA_TYPE)),
-    CENTERS_BYTES(_k * _d * sizeof(DATA_TYPE)) {
+    CENTERS_BYTES(_k * _d * sizeof(DATA_TYPE)),
+    points(_points) {
 
   CHECK_CUDA_ERROR(cudaHostAlloc(&h_points, POINTS_BYTES, cudaHostAllocDefault));
   for (size_t i = 0; i < n; ++i) {
     for (size_t j = 0; j < d; ++j) {
-      h_points[i * d + j] = points[i]->get(j);
+      h_points[i * d + j] = _points[i]->get(j);
     }
   }
   CHECK_CUDA_ERROR(cudaMalloc(&d_points, POINTS_BYTES));
   CHECK_CUDA_ERROR(cudaMemcpy(d_points, h_points, POINTS_BYTES, cudaMemcpyHostToDevice));
 
-  initCenters(points);
+  initCenters(_points);
 }
 
 Kmeans::~Kmeans () {
   CHECK_CUDA_ERROR(cudaFreeHost(h_points));
   CHECK_CUDA_ERROR(cudaFreeHost(h_centers));
+  CHECK_CUDA_ERROR(cudaFreeHost(h_last_centers));
+  CHECK_CUDA_ERROR(cudaFreeHost(h_points_clusters));
   CHECK_CUDA_ERROR(cudaFree(d_centers));
   CHECK_CUDA_ERROR(cudaFree(d_points));
 }
 
 bool Kmeans::run (uint64_t maxiter) {
   cout << "Running..." << endl;
+  bool converged = false;
+
+  /* INIT */
   DATA_TYPE* d_distances;
   CHECK_CUDA_ERROR(cudaMalloc(&d_distances, n * k * sizeof(DATA_TYPE)));
   uint32_t* d_points_clusters;
   CHECK_CUDA_ERROR(cudaMalloc(&d_points_clusters, n * sizeof(uint32_t)));
-  uint32_t* h_points_clusters;
   CHECK_CUDA_ERROR(cudaMallocHost(&h_points_clusters, n * sizeof(uint32_t)));
   uint64_t* h_clusters_len;
   CHECK_CUDA_ERROR(cudaMallocHost(&h_clusters_len, k * sizeof(uint64_t)));
@@ -173,18 +179,30 @@ bool Kmeans::run (uint64_t maxiter) {
   uint64_t max_cluster_len = 0;
   dim3 dist_grid_dim(n, k);
   dim3 argmin_block_dim(k, d);
-  while (iter++ < maxiter) { // && !cmpCenters()) { 
+
+  /* MAIN LOOP */
+  while (iter++ < maxiter) { // && !cmpCenters()) {
+
+    /* COMPUTE DISTANCES */
     if (DEBUG_KERNELS_INVOKATION) printf("compute_distances: Grid (%d, %d, %d), Block (%d, %d, %d)\n", dist_grid_dim.x, dist_grid_dim.y, dist_grid_dim.z, d, 1, 1);
     compute_distances<<<dist_grid_dim, d>>>(d_distances, d_centers, d_points);
     CHECK_LAST_CUDA_ERROR();
 
-    DATA_TYPE tmp[n * k];
-    CHECK_CUDA_ERROR(cudaMemcpy(tmp, d_distances, n * k * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost));
-    for (uint32_t i = 0; i < n; ++i)
-      for (uint32_t j = 0; j < k; ++j)
-        printf("%u %u -> %.3f\n", i, j, tmp[i * k + j]);
-    cout << endl;
+    #if DEBUG_KERNEL_DISTANCES
+      printf("DEBUG_KERNEL_DISTANCES\n");
+      DATA_TYPE tmp[n * k];
+      CHECK_CUDA_ERROR(cudaMemcpy(tmp, d_distances, n * k * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost));
+      for (uint32_t i = 0; i < n; ++i)
+        for (uint32_t j = 0; j < k; ++j)
+          printf("%u %u -> %.3f\n", i, j, tmp[i * k + j]);
+      cout << endl;
+    #endif
 
+
+    /* ASSIGN POINTS TO NEW CLUSTERS */
+    #if DEBUG_KERNEL_ARGMIN
+      printf("DEBUG_KERNEL_ARGMIN\n");
+    #endif
     memset(h_clusters_len, 0, k * sizeof(uint64_t));
     for (size_t i = 0; i < n; i++) {
       cub::KeyValuePair<int32_t, DATA_TYPE> *d_argmin = NULL;
@@ -206,37 +224,68 @@ bool Kmeans::run (uint64_t maxiter) {
       CHECK_CUDA_ERROR(cudaFree(d_argmin));
       CHECK_CUDA_ERROR(cudaDeviceSynchronize());
 
-      printf("Argmin point %lu: %d %.3f\n", i, argmin_idx, argmin_val);
+      #if DEBUG_KERNEL_ARGMIN
+        printf("Argmin point %lu: %d %.3f\n", i, argmin_idx, argmin_val);
+      #endif
+
       ++h_clusters_len[argmin_idx];
       max_cluster_len = max_cluster_len > h_clusters_len[argmin_idx] ? max_cluster_len : h_clusters_len[argmin_idx];
       h_points_clusters[i] = argmin_idx;
     }
-
+    #if DEBUG_KERNEL_ARGMIN
+      printf("\n");
+    #endif
     CHECK_CUDA_ERROR(cudaMemcpy(d_points_clusters, h_points_clusters, n * sizeof(uint32_t), cudaMemcpyHostToDevice));
     CHECK_CUDA_ERROR(cudaMemcpy(d_clusters_len, h_clusters_len, k * sizeof(uint64_t), cudaMemcpyHostToDevice));
     
+
+    /* COMPUTE NEW CENTERS */
     dim3 centers_grid_dim(k, max_cluster_len);
-    if (DEBUG_KERNELS_INVOKATION) printf("compute_distances: Grid (%d, %d, %d), Block (%d, %d, %d)\n", centers_grid_dim.x, centers_grid_dim.y, centers_grid_dim.z, d, 1, 1);
+    if (DEBUG_KERNELS_INVOKATION) printf("compute_centers: Grid (%d, %d, %d), Block (%d, %d, %d)\n", centers_grid_dim.x, centers_grid_dim.y, centers_grid_dim.z, d, 1, 1);
     compute_centers<<<centers_grid_dim, d>>>(d_centers, d_points, d_points_clusters, d_clusters_len);
     CHECK_LAST_CUDA_ERROR();
 
-    DATA_TYPE tmp2[d * k];
-    CHECK_CUDA_ERROR(cudaMemcpy(tmp2, d_centers, d * k * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost));
-    cout << endl << "CENTERS" << endl;
-    for (uint32_t i = 0; i < k; ++i) {
-      for (uint32_t j = 0; j < d; ++j)
-        printf("%.3f, ", tmp2[i * d + j]);
+    #if DEBUG_KERNEL_CENTERS
+      printf("DEBUG_KERNEL_CENTERS\n");
+      DATA_TYPE tmp2[d * k];
+      CHECK_CUDA_ERROR(cudaMemcpy(tmp2, d_centers, d * k * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost));
+      cout << endl << "CENTERS" << endl;
+      for (uint32_t i = 0; i < k; ++i) {
+        for (uint32_t j = 0; j < d; ++j)
+          printf("%.3f, ", tmp2[i * d + j]);
+        cout << endl;
+      }
       cout << endl;
-    }
-    cout << endl;
-  }
+    #endif
 
+    /* CHECK IF CONVERGED */
+    if (iter > 1 && cmpCenters()) { // Exit
+      converged = true;
+      break;
+    } else { // Copy centers
+      memcpy(h_last_centers, h_centers, CENTERS_BYTES);
+    }
+  }
+  /* MAIN LOOP END */
+
+  /* COPY BACK RESULTS*/
+  for (size_t i = 0; i < n; i++) {
+    points[i]->setCluster(h_points_clusters[i]);
+  }
+  
+
+  /* FREE MEMORY */
+  CHECK_CUDA_ERROR(cudaMalloc(&d_clusters_len, k * sizeof(uint64_t)));
   CHECK_CUDA_ERROR(cudaFree(d_distances));
-  return false;
+  CHECK_CUDA_ERROR(cudaFree(d_points_clusters));
+  CHECK_CUDA_ERROR(cudaFree(d_clusters_len));
+  CHECK_CUDA_ERROR(cudaFreeHost(h_clusters_len));
+
+  return converged;
 }
 
 bool Kmeans::cmpCenters () {
-  return true;
+  return memcmp(h_centers, h_last_centers, CENTERS_BYTES);
 }
 
 void Kmeans::to_csv(ostream& o, char separator) {
@@ -247,7 +296,7 @@ void Kmeans::to_csv(ostream& o, char separator) {
   }
   o << endl;
   for (size_t i = 0; i < n; ++i) {
-    o << 0 << separator; // FIXME cluser
+    o << h_points_clusters[i] << separator;
     for (size_t j = 0; j < d; ++j) {
       o << setprecision(8) << h_points[i * d + j];
       if (j != (d - 1)) o << separator;
