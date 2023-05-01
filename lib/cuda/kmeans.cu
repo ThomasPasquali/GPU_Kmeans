@@ -3,7 +3,6 @@
 #include <random>
 #include <iomanip>
 #include <cub/cub.cuh>
-// #include <cub/device/device_reduce.cuh>
 
 #include "../../include/common.h"
 #include "kmeans.h"
@@ -76,23 +75,26 @@ printf("off: %4lu, d: %-5d val: %.3f shfl: %.3f\n", offset, threadIdx.x, distanc
 } */
 
 __global__ void compute_centers(DATA_TYPE* centers, DATA_TYPE* points, uint32_t* points_clusters, uint64_t* clusters_len) {
-  uint64_t cluster_offset = blockIdx.x * blockDim.x + threadIdx.x;
-  uint64_t point_offset   = blockIdx.y * blockDim.x + threadIdx.x;
-
-  DATA_TYPE sum = points[point_offset];
+  uint32_t point   = blockIdx.x;
+  uint32_t cluster = points_clusters[point];
+  uint32_t d       = blockDim.x;
+  uint32_t d_i     = threadIdx.x;
+  // extern __shared__ DATA_TYPE centers_shared[];
   
-  if (blockIdx.y >= clusters_len[blockIdx.x]) { return; }
-  
-  if (blockIdx.x == 1 && blockIdx.y == 0)  printf("cl: %d p: %d d: %d p: %f sum: %f\n", blockIdx.x, blockIdx.y, threadIdx.x, points[point_offset], sum);
-  
-  for (int i = next_pow_2(blockDim.x); i > 0; i /= 2)
-    sum += __shfl_down_sync(SHFL_MASK, sum, i);
+  // if (point >= clusters_len[cluster]) { return; }
 
-  if (blockIdx.x == 1 && blockIdx.y == 0) printf("blk: %d %d %d, sum: %.3f\n", blockIdx.x, blockIdx.y, threadIdx.x, sum);
-
-  if (threadIdx.x == 0) {
-    centers[(blockIdx.x * blockDim.x) + blockIdx.y] = sum;
-  }
+  DATA_TYPE val = points[point * d + d_i];
+  
+  // if (cluster == 0 && d_i == 1) printf("cl: %u p: %u d: %u p_d: %.3f\n", cluster, point, d_i, val);
+  
+  // for (int i = next_pow_2(blockDim.x); i > 0; i /= 2) sum += __shfl_down_sync(SHFL_MASK, sum, i);
+  // atomicAdd(centers_shared + cluster * d + d_i, val);
+  // __syncthreads();
+  
+  //if (point == 0) {
+  atomicAdd(centers + cluster * d + d_i, val);  
+  // if (cluster == 0 && d_i == 1) printf("blk: %u %u %u, part_sum: %.3f\n", blockIdx.x, blockIdx.y, threadIdx.x, centers[cluster * d + d_i]);
+  //}
 }
 
 /* Kmeans class */
@@ -130,7 +132,6 @@ void Kmeans::initCenters (Point<DATA_TYPE>** points) {
     }
   }
   CHECK_CUDA_ERROR(cudaMalloc(&d_centers, CENTERS_BYTES));
-  CHECK_CUDA_ERROR(cudaMemcpy(d_centers, h_centers, CENTERS_BYTES, cudaMemcpyHostToDevice));
 }
 
 Kmeans::Kmeans (size_t _n, unsigned int _d, unsigned int _k, Point<DATA_TYPE>** _points)
@@ -160,9 +161,9 @@ Kmeans::~Kmeans () {
   CHECK_CUDA_ERROR(cudaFree(d_points));
 }
 
-bool Kmeans::run (uint64_t maxiter) {
+uint64_t Kmeans::run (uint64_t maxiter) {
   cout << "Running..." << endl;
-  bool converged = false;
+  uint64_t converged = maxiter;
 
   /* INIT */
   DATA_TYPE* d_distances;
@@ -184,6 +185,7 @@ bool Kmeans::run (uint64_t maxiter) {
   while (iter++ < maxiter) { // && !cmpCenters()) {
 
     /* COMPUTE DISTANCES */
+    CHECK_CUDA_ERROR(cudaMemcpy(d_centers, h_centers, CENTERS_BYTES, cudaMemcpyHostToDevice));
     if (DEBUG_KERNELS_INVOKATION) printf("compute_distances: Grid (%d, %d, %d), Block (%d, %d, %d)\n", dist_grid_dim.x, dist_grid_dim.y, dist_grid_dim.z, d, 1, 1);
     compute_distances<<<dist_grid_dim, d>>>(d_distances, d_centers, d_points);
     CHECK_LAST_CUDA_ERROR();
@@ -219,7 +221,6 @@ bool Kmeans::run (uint64_t maxiter) {
       DATA_TYPE argmin_val;
       CHECK_CUDA_ERROR(cudaMemcpy(&argmin_idx, &(d_argmin->key), sizeof(int32_t), cudaMemcpyDeviceToHost));
       CHECK_CUDA_ERROR(cudaMemcpy(&argmin_val, &(d_argmin->value), sizeof(DATA_TYPE), cudaMemcpyDeviceToHost));
-      
       CHECK_CUDA_ERROR(cudaFree(d_temp_storage));
       CHECK_CUDA_ERROR(cudaFree(d_argmin));
       CHECK_CUDA_ERROR(cudaDeviceSynchronize());
@@ -240,19 +241,24 @@ bool Kmeans::run (uint64_t maxiter) {
     
 
     /* COMPUTE NEW CENTERS */
-    dim3 centers_grid_dim(k, max_cluster_len);
+    cudaMemset(d_centers, 0, k * d * sizeof(DATA_TYPE));
+    dim3 centers_grid_dim(n);
     if (DEBUG_KERNELS_INVOKATION) printf("compute_centers: Grid (%d, %d, %d), Block (%d, %d, %d)\n", centers_grid_dim.x, centers_grid_dim.y, centers_grid_dim.z, d, 1, 1);
-    compute_centers<<<centers_grid_dim, d>>>(d_centers, d_points, d_points_clusters, d_clusters_len);
+    compute_centers<<<centers_grid_dim, d/*, k * d * sizeof(DATA_TYPE) */>>>(d_centers, d_points, d_points_clusters, d_clusters_len);
     CHECK_LAST_CUDA_ERROR();
+
+    CHECK_CUDA_ERROR(cudaMemcpy(h_centers, d_centers, d * k * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost));
+    for (uint32_t i = 0; i < k; ++i)
+        for (uint32_t j = 0; j < d; ++j)
+          h_centers[i * d + j] /= h_clusters_len[i];
+    
 
     #if DEBUG_KERNEL_CENTERS
       printf("DEBUG_KERNEL_CENTERS\n");
-      DATA_TYPE tmp2[d * k];
-      CHECK_CUDA_ERROR(cudaMemcpy(tmp2, d_centers, d * k * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost));
       cout << endl << "CENTERS" << endl;
       for (uint32_t i = 0; i < k; ++i) {
         for (uint32_t j = 0; j < d; ++j)
-          printf("%.3f, ", tmp2[i * d + j]);
+          printf("%.3f, ", h_centers[i * d + j]);
         cout << endl;
       }
       cout << endl;
@@ -260,7 +266,7 @@ bool Kmeans::run (uint64_t maxiter) {
 
     /* CHECK IF CONVERGED */
     if (iter > 1 && cmpCenters()) { // Exit
-      converged = true;
+      converged = iter;
       break;
     } else { // Copy centers
       memcpy(h_last_centers, h_centers, CENTERS_BYTES);
@@ -285,7 +291,13 @@ bool Kmeans::run (uint64_t maxiter) {
 }
 
 bool Kmeans::cmpCenters () {
-  return memcmp(h_centers, h_last_centers, CENTERS_BYTES);
+  const DATA_TYPE EPSILON = numeric_limits<DATA_TYPE>::epsilon();
+  for (uint32_t i = 0; i < k; ++i)
+        for (uint32_t j = 0; j < d; ++j)
+          if (fabs(h_centers[i * d + j] - h_last_centers[i * d + j]) >= EPSILON)
+            return false;
+  return true;
+  // return memcmp(h_centers, h_last_centers, CENTERS_BYTES);
 }
 
 void Kmeans::to_csv(ostream& o, char separator) {

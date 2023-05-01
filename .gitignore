@@ -3,5 +3,5 @@ bin
 .vscode
 
 ## FILES
-*.csv
-!3Dpoints.csv
+out/*/*.csv
+temp-plot.html

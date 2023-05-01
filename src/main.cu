@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <vector>
 #include <algorithm>
+#include <string>
+#include <fstream>
 
 #include "../include/common.h"
 #include "../include/cxxopts.hpp"
@@ -13,7 +15,8 @@
 #define ARG_SAMPLES     1
 #define ARG_CLUSTERS    2
 #define ARG_MAXITER     3
-const char* ARG_STR[4] = {"dimensions", "n-samples", "clusters", "maxiter"};
+#define ARG_OUTFILE     4
+const char* ARG_STR[5] = {"dimensions", "n-samples", "clusters", "maxiter", "out-file"};
 
 using namespace std;
 
@@ -27,15 +30,15 @@ int getArg_u (int arg) {
     exit(EXIT_ARGS);
   }
 }
-/* FIXME size_t getArg_ul (int arg) { 
+string getArg_s (int arg) {
   try {
-    return args[ARG_STR[arg]].as<size_t>();
+    return args[ARG_STR[arg]].as<string>();
   } catch(...) {
     printErrDesc(EXIT_ARGS);
     cerr << ARG_STR[arg] << endl;
     exit(EXIT_ARGS);
   }
-} */
+}
 
 int main(int argc, char **argv) {
   // Read input args
@@ -46,7 +49,8 @@ int main(int argc, char **argv) {
     ("d,dimensions",  "Number of dimensions of a point",  cxxopts::value<int>())
     ("n,n-samples",   "Number of points",                 cxxopts::value<int>())
     ("k,clusters",    "Number of clusters",               cxxopts::value<int>())
-    ("m,maxiter",     "Maximum number of iterations",     cxxopts::value<int>());
+    ("m,maxiter",     "Maximum number of iterations",     cxxopts::value<int>())
+    ("o,out-file",    "Output filename",                  cxxopts::value<string>());
 
   args = options.parse(argc, argv);
 
@@ -55,10 +59,11 @@ int main(int argc, char **argv) {
     exit(0);
   }
 
-  unsigned int  d = getArg_u(ARG_DIMENSIONS);
-  size_t        n = getArg_u(ARG_SAMPLES);
-  unsigned int  k = getArg_u(ARG_CLUSTERS);
-  size_t        maxiter = getArg_u(ARG_MAXITER);
+  unsigned int  d         = getArg_u(ARG_DIMENSIONS);
+  size_t        n         = getArg_u(ARG_SAMPLES);
+  unsigned int  k         = getArg_u(ARG_CLUSTERS);
+  size_t        maxiter   = getArg_u(ARG_MAXITER);
+  string        out_file  = getArg_s(ARG_OUTFILE);
   
   InputParser<DATA_TYPE> input(cin, d, n);
   if (DEBUG_INPUT_DATA) cout << input << endl;
@@ -85,8 +90,18 @@ int main(int argc, char **argv) {
   if (DEBUG_DEVICE) describeDevice(dev, deviceProp);
   
   Kmeans kmeans(n, d, k, input.get_dataset());
-  kmeans.run(maxiter);
-  kmeans.to_csv(cout);
+  uint64_t converged = kmeans.run(maxiter);
+
+  #if DEBUG_OUTPUT_INFO
+    if (converged < maxiter)
+      printf("K-means converged at iteration %lu\n", converged);
+    else
+      printf("K-means did NOT converge\n");
+  #endif
+
+  ofstream fout(out_file);
+  kmeans.to_csv(fout);
+  fout.close();
 
   return 0;
 }

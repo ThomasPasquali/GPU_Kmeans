@@ -32,10 +32,10 @@ class Kmeans {
      * @brief 
      * Notice: once finished will set clusters on each of Point<DATA_TYPE> of points passed in contructor
      * @param maxiter 
-     * @return true if converged
-     * @return false if maxiter passed
+     * @return iter at which k-means converged
+     * @return maxiter if did not converge
      */
-    bool run(uint64_t maxiter);
+    uint64_t run(uint64_t maxiter);
     void to_csv(ostream& o, char separator = ',');
 };
 
