@@ -4,9 +4,9 @@
 #include <iomanip>
 #include <cub/cub.cuh>
 
-#include "../../include/common.h"
+#include "../include/common.h"
 #include "kmeans.h"
-#include "utils.cuh"
+#include "../lib/cuda/utils.cuh"
 
 using namespace std;
 

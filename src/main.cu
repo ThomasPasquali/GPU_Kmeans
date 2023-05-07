@@ -9,7 +9,7 @@
 #include "../include/input_parser.hpp"
 #include "../include/errors.hpp"
 #include "../lib/cuda/utils.cuh"
-#include "../lib/cuda/kmeans.h"
+#include "./kmeans.h"
 
 #define ARG_DIMENSIONS  0
 #define ARG_SAMPLES     1

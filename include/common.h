@@ -1,7 +1,7 @@
 #ifndef __COMMON__
 #define __COMMON__
 
-#define DEBUG_DEVICE 0
+#define DEBUG_DEVICE 1
 
 #define DEBUG_INPUT_DATA 0
 #define DEBUG_INIT_CENTERS 0
