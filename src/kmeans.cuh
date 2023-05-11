@@ -7,9 +7,10 @@
 /**
  * @brief 
  * 0: compute_distances_one_point_per_warp
- * 1: compute_distances_shmem 
+ * 1: compute_distances_shmem
+ * 2: compute_distances_shfl
  */
-#define COMPUTE_DISTANCES_KERNEL 0
+#define COMPUTE_DISTANCES_KERNEL 2
 
 class Kmeans {
   private:

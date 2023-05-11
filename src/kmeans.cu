@@ -29,34 +29,54 @@ __host__ __device__ unsigned int next_pow_2(unsigned int x) {
 #define SHFL_MASK 0xffffffff
 /* Device kernels */
 __global__ void compute_distances_one_point_per_warp(DATA_TYPE* distances, DATA_TYPE* centers, DATA_TYPE* points) {
-  uint64_t point_offset = blockIdx.x * blockDim.x + threadIdx.x;
-  uint64_t center_offset = blockIdx.y * blockDim.x + threadIdx.x;
+  const uint64_t point_offset = blockIdx.x * blockDim.x + threadIdx.x;
+  const uint64_t center_offset = blockIdx.y * blockDim.x + threadIdx.x;
   DATA_TYPE dist = points[point_offset] - centers[center_offset];
   dist *= dist;
   
   for (int i = next_pow_2(blockDim.x); i > 0; i /= 2)
     dist += __shfl_down_sync(SHFL_MASK, dist, i);
 
-  distances[(blockIdx.x * gridDim.y) + blockIdx.y] = dist;
+  if (threadIdx.x == 0) {
+    distances[(blockIdx.x * gridDim.y) + blockIdx.y] = dist;
+  }
 }
 
 __global__ void compute_distances_shmem(DATA_TYPE* distances, DATA_TYPE* centers, DATA_TYPE* points, const uint32_t points_per_warp, const uint32_t d) {
-  uint64_t point_i = (blockIdx.x * points_per_warp) + (threadIdx.x / d);
-  uint64_t center_i = blockIdx.y;
-  uint32_t d_i = threadIdx.x % d;
-  uint64_t dists_i = (center_i * blockDim.y * d) + ((point_i % points_per_warp) * d) + d_i;
+  const uint64_t point_i = (blockIdx.x * points_per_warp) + (threadIdx.x / d);
+  const uint64_t center_i = blockIdx.y;
+  const uint32_t d_i = threadIdx.x % d;
+  const uint64_t dists_i = (center_i * blockDim.y * d) + ((point_i % points_per_warp) * d) + d_i;
 
   extern __shared__ DATA_TYPE dists[];
 
   if (threadIdx.x < points_per_warp * d) {
     DATA_TYPE dist = fabs(points[point_i * d + d_i] - centers[center_i * d + d_i]);
-    dists[dists_i] = dist;
+    dists[dists_i] = dist * dist;
     __syncthreads();
     if (d_i == 0) {
       for (int i = 1; i < d; i++) {
         dists[dists_i] += dists[dists_i + i];
       }
       distances[(point_i * center_i) + point_i] = dists[dists_i];
+    }
+  }
+}
+
+__global__ void compute_distances_shfl(DATA_TYPE* distances, DATA_TYPE* centers, DATA_TYPE* points, const uint32_t points_n, const uint32_t points_per_warp, const uint32_t d, const uint32_t d_closest_2_pow) {
+  const uint64_t point_i = (blockIdx.x * points_per_warp) + (threadIdx.x / d_closest_2_pow);
+  const uint64_t center_i = blockIdx.y;
+  const uint32_t d_i = threadIdx.x % d_closest_2_pow;
+
+  if (point_i < points_n && d_i < d) {
+    DATA_TYPE dist = fabs(points[point_i * d + d_i] - centers[center_i * d + d_i]);
+    dist *= dist;
+    for (int i = d_closest_2_pow / 2; i > 0; i /= 2) {
+      dist += __shfl_down_sync(SHFL_MASK, dist, i);
+      // if (point_i == 3) printf("%d  p: %lu c: %lu d: %u v: %.3f\n", i, point_i, center_i, d_i, dist);
+    }
+    if (d_i == 0) {
+      distances[(point_i * gridDim.y) + center_i] = dist;
     }
   }
 }
@@ -169,13 +189,14 @@ uint64_t Kmeans::run (uint64_t maxiter) {
 
   #if COMPUTE_DISTANCES_KERNEL == 1
     const uint32_t dist_max_points_per_warp = deviceProps->warpSize / d;
-    // 11 x 3
-    // dist_max_points_per_warp 10
-    // ceil(11 / 10) = 2
-    // 10 * 3 = 30
     dim3 dist_grid_dim(ceil(((float) n) / dist_max_points_per_warp), k);
     dim3 dist_block_dim(dist_max_points_per_warp * d);
     uint32_t dist_kernel_sh_mem = k * dist_max_points_per_warp * d * sizeof(DATA_TYPE);
+  #elif COMPUTE_DISTANCES_KERNEL == 2
+    const uint32_t dist_max_points_per_warp = deviceProps->warpSize / next_pow_2(d);
+    dim3 dist_grid_dim(ceil(((float) n) / dist_max_points_per_warp), k);
+    dim3 dist_block_dim(dist_max_points_per_warp * next_pow_2(d));
+    uint32_t dist_kernel_sh_mem = 0;
   #else
     dim3 dist_grid_dim(n, k);
     dim3 dist_block_dim(d);
@@ -197,6 +218,8 @@ uint64_t Kmeans::run (uint64_t maxiter) {
     #endif
     #if COMPUTE_DISTANCES_KERNEL == 1
       compute_distances_shmem<<<dist_grid_dim, dist_block_dim, dist_kernel_sh_mem>>>(d_distances, d_centers, d_points, dist_max_points_per_warp, d);
+    #elif COMPUTE_DISTANCES_KERNEL == 2     
+      compute_distances_shfl<<<dist_grid_dim, dist_block_dim>>>(d_distances, d_centers, d_points, n, dist_max_points_per_warp, d, next_pow_2(d));
     #else
       compute_distances_one_point_per_warp<<<dist_grid_dim, dist_block_dim>>>(d_distances, d_centers, d_points);
     #endif
