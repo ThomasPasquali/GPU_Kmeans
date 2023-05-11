@@ -11,7 +11,7 @@ pip install scikit-learn
 ## Data generator
 
 ```bash
-python3 py_utils/data_generator.py -n 1000 -d 3 -min 0 -max 10 -o 3Dpoints.csv
+python3 py_utils/data_generator.py -n 1000 -d 3 -min 0 -max 10 -o datasets/3Dpoints.csv
 ```
 
 ## Plots

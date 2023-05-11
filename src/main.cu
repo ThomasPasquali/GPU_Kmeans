@@ -5,11 +5,12 @@
 #include <fstream>
 
 #include "../include/common.h"
+#include "../include/colors.h"
 #include "../include/cxxopts.hpp"
 #include "../include/input_parser.hpp"
 #include "../include/errors.hpp"
 #include "../lib/cuda/utils.cuh"
-#include "./kmeans.h"
+#include "./kmeans.cuh"
 
 #define ARG_DIMENSIONS  0
 #define ARG_SAMPLES     1
@@ -89,14 +90,14 @@ int main(int argc, char **argv) {
   cudaGetDeviceProperties(&deviceProp, dev);
   if (DEBUG_DEVICE) describeDevice(dev, deviceProp);
   
-  Kmeans kmeans(n, d, k, input.get_dataset());
+  Kmeans kmeans(n, d, k, input.get_dataset(), &deviceProp);
   uint64_t converged = kmeans.run(maxiter);
 
   #if DEBUG_OUTPUT_INFO
     if (converged < maxiter)
-      printf("K-means converged at iteration %lu\n", converged);
+      printf(BOLDBLUE "K-means converged at iteration %lu\n" RESET, converged);
     else
-      printf("K-means did NOT converge\n");
+      printf(BOLDBLUE "K-means did NOT converge\n" RESET);
   #endif
 
   ofstream fout(out_file);

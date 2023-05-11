@@ -4,6 +4,13 @@
 #include "../include/common.h"
 #include "../include/point.hpp"
 
+/**
+ * @brief 
+ * 0: compute_distances_one_point_per_warp
+ * 1: compute_distances_shmem 
+ */
+#define COMPUTE_DISTANCES_KERNEL 0
+
 class Kmeans {
   private:
     const size_t n;
@@ -18,6 +25,8 @@ class Kmeans {
     DATA_TYPE* d_points;
     DATA_TYPE* d_centers;
 
+    cudaDeviceProp* deviceProps;
+
     /**
      * @brief Select k random centers sampled form points
      */
@@ -25,7 +34,7 @@ class Kmeans {
     bool cmpCenters();
 
   public:
-    Kmeans(size_t n, unsigned int d, unsigned int k, Point<DATA_TYPE>** points);
+    Kmeans(size_t n, unsigned int d, unsigned int k, Point<DATA_TYPE>** points, cudaDeviceProp* deviceProps);
     ~Kmeans();
     
     /**

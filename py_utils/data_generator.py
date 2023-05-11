@@ -27,7 +27,7 @@ if args.cluster_col:
     data.append([0] + [random.uniform(args.min_value, args.max_value) for j in range(args.dimensions)])
 else:
   for i in range(args.n_samples):
-    data.append([random.uniform(args.min_value, args.max_value) for j in range(args.dimensions)])
+    data.append([int(random.uniform(args.min_value, args.max_value)) for j in range(args.dimensions)])
 
 columns = None
 if args.cluster_col:
