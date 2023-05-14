@@ -1,0 +1,3 @@
+[submodule "comparisons/BCMatch4Graphs"]
+	path = comparisons/BCMatch4Graphs
+	url = https://github.com/bootcmatch/BCMatch4Graphs.git
