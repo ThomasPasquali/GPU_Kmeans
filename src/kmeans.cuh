@@ -12,6 +12,13 @@
  */
 #define COMPUTE_DISTANCES_KERNEL 2
 
+/**
+ * @brief 
+ * 0: DeviceReduce::ArgMin
+ * 1: argmin_shfl
+ */
+#define ARGMIN_KERNEL 0
+
 class Kmeans {
   private:
     const size_t n;

@@ -81,6 +81,30 @@ __global__ void compute_distances_shfl(DATA_TYPE* distances, DATA_TYPE* centers,
   }
 }
 
+__global__ void argmin_shfl(DATA_TYPE* distances, uint32_t* argmins, const uint32_t n, const uint32_t k, const uint32_t k_closest_2_pow, const uint32_t centers_per_warp) {
+  // TODO
+  const uint64_t distance_i = (blockIdx.x * centers_per_warp) + threadIdx.x;
+  const uint32_t lane = threadIdx.x % k_closest_2_pow;
+
+  if (distance_i < k * n) {
+    DATA_TYPE min = distances[distance_i], tmp; // FIXME
+    DATA_TYPE val = min;
+    uint32_t minidx = 0;
+    for (int i = k_closest_2_pow / 2; i > 0; i /= 2) {
+      tmp = __shfl_down_sync(SHFL_MASK, min, i, k_closest_2_pow);
+      if (tmp < min) {
+        min = tmp;
+        minidx = i;
+      } 
+      // if (point_i == 3) 
+      printf("%d  b: %u t: %u val: %.3f min: %.3f minidx: %u\n", i, blockIdx.x, threadIdx.x, val, min, minidx);
+    }
+    if (lane == 0) {
+      argmins[(blockIdx.x * centers_per_warp) + (threadIdx.x / k_closest_2_pow)] = minidx;
+    }
+  }
+}
+
 __global__ void compute_centers(DATA_TYPE* centers, DATA_TYPE* points, uint32_t* points_clusters, uint64_t* clusters_len) {
   uint32_t point   = blockIdx.x;
   uint32_t cluster = points_clusters[point];
@@ -185,7 +209,6 @@ uint64_t Kmeans::run (uint64_t maxiter) {
 
   uint64_t iter = 0;
   uint64_t max_cluster_len = 0;
-  dim3 argmin_block_dim(k, d);
 
   #if COMPUTE_DISTANCES_KERNEL == 1
     const uint32_t dist_max_points_per_warp = deviceProps->warpSize / d;
@@ -193,7 +216,7 @@ uint64_t Kmeans::run (uint64_t maxiter) {
     dim3 dist_block_dim(dist_max_points_per_warp * d);
     uint32_t dist_kernel_sh_mem = k * dist_max_points_per_warp * d * sizeof(DATA_TYPE);
   #elif COMPUTE_DISTANCES_KERNEL == 2
-    const uint32_t dist_max_points_per_warp = deviceProps->warpSize / next_pow_2(d);
+    const uint32_t dist_max_points_per_warp = deviceProps->warpSize / next_pow_2(d); // FIXME k > 32
     dim3 dist_grid_dim(ceil(((float) n) / dist_max_points_per_warp), k);
     dim3 dist_block_dim(dist_max_points_per_warp * next_pow_2(d));
     uint32_t dist_kernel_sh_mem = 0;
@@ -201,6 +224,14 @@ uint64_t Kmeans::run (uint64_t maxiter) {
     dim3 dist_grid_dim(n, k);
     dim3 dist_block_dim(d);
     uint32_t dist_kernel_sh_mem = 0;
+  #endif
+
+  #if ARGMIN_KERNEL == 1
+    uint32_t* d_argmins;
+    CHECK_CUDA_ERROR(cudaMalloc(&d_argmins, n * sizeof(uint32_t)));
+    const uint32_t argmin_max_centers_per_warp = deviceProps->warpSize / next_pow_2(k); // FIXME k > 32
+    dim3 argmin_grid_dim(ceil(((float) n) / argmin_max_centers_per_warp));
+    dim3 argmin_block_dim(argmin_max_centers_per_warp * next_pow_2(k));
   #endif
   
 
@@ -239,46 +270,65 @@ uint64_t Kmeans::run (uint64_t maxiter) {
       DATA_TYPE tmp[n * k];
       CHECK_CUDA_ERROR(cudaMemcpy(tmp, d_distances, n * k * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost));
       cudaDeviceSynchronize();
+      printf("p  c  -> distance\n");
       for (uint32_t i = 0; i < n; ++i)
         for (uint32_t j = 0; j < k; ++j)
-          printf("%u %u -> %.3f\n", i, j, tmp[i * k + j]);
+          printf("%-2u %-2u -> %.3f\n", i, j, tmp[i * k + j]);
       cout << RESET << endl;
     #endif
 
 
     /* ASSIGN POINTS TO NEW CLUSTERS */
     #if DEBUG_KERNEL_ARGMIN
-      printf("DEBUG_KERNEL_ARGMIN\n");
-    #endif
-    memset(h_clusters_len, 0, k * sizeof(uint64_t));
-    for (size_t i = 0; i < n; i++) {
-      cub::KeyValuePair<int32_t, DATA_TYPE> *d_argmin = NULL;
-      CHECK_CUDA_ERROR(cudaMalloc(&d_argmin, sizeof(int32_t) + sizeof(DATA_TYPE)));
-      // Allocate temporary storage
-      void *d_temp_storage = NULL; size_t temp_storage_bytes = 0;
-      cub::DeviceReduce::ArgMin(d_temp_storage, temp_storage_bytes, d_distances, d_argmin, k);
-      CHECK_CUDA_ERROR(cudaMalloc(&d_temp_storage, temp_storage_bytes));
-      
-      // Run argmin-reduction
-      cub::DeviceReduce::ArgMin(d_temp_storage, temp_storage_bytes, d_distances + i * k, d_argmin, k);
-
-      int32_t argmin_idx;
-      DATA_TYPE argmin_val;
-      CHECK_CUDA_ERROR(cudaMemcpy(&argmin_idx, &(d_argmin->key), sizeof(int32_t), cudaMemcpyDeviceToHost));
-      CHECK_CUDA_ERROR(cudaMemcpy(&argmin_val, &(d_argmin->value), sizeof(DATA_TYPE), cudaMemcpyDeviceToHost));
-      CHECK_CUDA_ERROR(cudaFree(d_temp_storage));
-      CHECK_CUDA_ERROR(cudaFree(d_argmin));
-      CHECK_CUDA_ERROR(cudaDeviceSynchronize());
-
-      #if DEBUG_KERNEL_ARGMIN
-        printf("Argmin point %lu: %d %.3f\n", i, argmin_idx, argmin_val);
+      printf(GREEN "[DEBUG_KERNEL_ARGMIN]\n" RESET);
+      #if ARGMIN_KERNEL == 1
+        printf(GREEN "argmin_max_centers_per_warp: %u\n" RESET, argmin_max_centers_per_warp);
       #endif
+    #endif
+    #if ARGMIN_KERNEL == 0
+      memset(h_clusters_len, 0, k * sizeof(uint64_t));
+      for (size_t i = 0; i < n; i++) {
+        cub::KeyValuePair<int32_t, DATA_TYPE> *d_argmin = NULL;
+        CHECK_CUDA_ERROR(cudaMalloc(&d_argmin, sizeof(int32_t) + sizeof(DATA_TYPE)));
+        // Allocate temporary storage
+        void *d_temp_storage = NULL; size_t temp_storage_bytes = 0;
+        cub::DeviceReduce::ArgMin(d_temp_storage, temp_storage_bytes, d_distances, d_argmin, k);
+        CHECK_CUDA_ERROR(cudaMalloc(&d_temp_storage, temp_storage_bytes));
+        
+        // Run argmin-reduction
+        cub::DeviceReduce::ArgMin(d_temp_storage, temp_storage_bytes, d_distances + i * k, d_argmin, k);
 
-      ++h_clusters_len[argmin_idx];
-      max_cluster_len = max_cluster_len > h_clusters_len[argmin_idx] ? max_cluster_len : h_clusters_len[argmin_idx];
-      h_points_clusters[i] = argmin_idx;
-    }
+        int32_t argmin_idx;
+        DATA_TYPE argmin_val;
+        CHECK_CUDA_ERROR(cudaMemcpy(&argmin_idx, &(d_argmin->key), sizeof(int32_t), cudaMemcpyDeviceToHost));
+        CHECK_CUDA_ERROR(cudaMemcpy(&argmin_val, &(d_argmin->value), sizeof(DATA_TYPE), cudaMemcpyDeviceToHost));
+        CHECK_CUDA_ERROR(cudaFree(d_temp_storage));
+        CHECK_CUDA_ERROR(cudaFree(d_argmin));
+        CHECK_CUDA_ERROR(cudaDeviceSynchronize());
+
+        #if DEBUG_KERNEL_ARGMIN
+          printf(GREEN "Argmin point %lu: %d %.3f" RESET "\n", i, argmin_idx, argmin_val);
+        #endif
+
+        ++h_clusters_len[argmin_idx];
+        max_cluster_len = max_cluster_len > h_clusters_len[argmin_idx] ? max_cluster_len : h_clusters_len[argmin_idx];
+        h_points_clusters[i] = argmin_idx;
+      }
+    #else
+      if (DEBUG_KERNELS_INVOKATION) printf(YELLOW "[KERNEL]" RESET " argmin: Grid (%d, %d, %d), Block (%d, %d, %d), Sh.mem. %uB\n", argmin_grid_dim.x, argmin_grid_dim.y, argmin_grid_dim.z, argmin_block_dim.x, argmin_block_dim.y, argmin_block_dim.z, 0);
+      argmin_shfl<<<argmin_grid_dim, argmin_block_dim>>>(d_distances, d_argmins, n, k, next_pow_2(k), argmin_max_centers_per_warp);
+      cudaDeviceSynchronize();
+    #endif
     #if DEBUG_KERNEL_ARGMIN
+      #if ARGMIN_KERNEL == 1
+        uint32_t tmp1[n];
+        CHECK_CUDA_ERROR(cudaMemcpy(tmp1, d_argmins, n * sizeof(uint32_t), cudaMemcpyDeviceToHost));
+        cudaDeviceSynchronize();
+        printf(GREEN "p  -> c\n");
+        for (uint32_t i = 0; i < n; ++i)
+            printf("%-2u -> %-2u\n", i, tmp1[i]);
+        cout << RESET << endl;
+      #endif
       printf("\n");
     #endif
     CHECK_CUDA_ERROR(cudaMemcpy(d_points_clusters, h_points_clusters, n * sizeof(uint32_t), cudaMemcpyHostToDevice));
