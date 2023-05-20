@@ -99,9 +99,38 @@ __global__ void compute_centers(DATA_TYPE* centers, DATA_TYPE* points, uint32_t*
   // __syncthreads();
   
   //if (point == 0) {
-  atomicAdd(centers + cluster * d + d_i, val);  
+  atomicAdd(centers + cluster * d + d_i, val);
   // if (cluster == 0 && d_i == 1) printf("blk: %u %u %u, part_sum: %.3f\n", blockIdx.x, blockIdx.y, threadIdx.x, centers[cluster * d + d_i]);
   //}
+}
+
+__global__ void compute_centers_shfl(DATA_TYPE* centers, DATA_TYPE* points, uint32_t* points_clusters, uint64_t n, uint32_t d) {  
+  uint32_t cluster_idx = 2 * blockIdx.y * blockDim.x + threadIdx.x;
+  uint32_t point_idx   = cluster_idx * blockDim.y + threadIdx.y;
+  
+  uint32_t cluster_off = blockDim.x;
+  uint32_t point_off   = cluster_off * blockDim.y;
+  
+  float val = 0;
+
+  if (point_idx < n * d && blockIdx.x == points_clusters[cluster_idx]) { 
+    val = points[point_idx]; 
+  }
+  
+  if (point_idx + point_off < n * d && blockIdx.x == points_clusters[cluster_idx + cluster_off]) { 
+    val += points[point_idx + point_off]; 
+  } 
+
+  //if (blockIdx.x == 0 && threadIdx.y == 0) printf("%d %d %d+%d %f\n", blockIdx.x, blockIdx.y, cluster_idx, cluster_idx + cluster_off, val);
+  
+  for (int offset = warpSize / 2; offset > 0; offset /= 2) {
+    val += __shfl_down_sync(SHFL_MASK, val, offset);
+  }
+  
+  if (threadIdx.x % warpSize == 0) {
+    //if (blockIdx.x == 0 && threadIdx.y == 0) { printf("\n%d %d %f\n", threadIdx.x, blockIdx.y, val); }
+    atomicAdd(&centers[blockIdx.x * blockDim.y + threadIdx.y], val);
+  }
 }
 
 /* Kmeans class */
@@ -281,22 +310,65 @@ uint64_t Kmeans::run (uint64_t maxiter) {
     #if DEBUG_KERNEL_ARGMIN
       printf("\n");
     #endif
+
     CHECK_CUDA_ERROR(cudaMemcpy(d_points_clusters, h_points_clusters, n * sizeof(uint32_t), cudaMemcpyHostToDevice));
     CHECK_CUDA_ERROR(cudaMemcpy(d_clusters_len, h_clusters_len, k * sizeof(uint64_t), cudaMemcpyHostToDevice));
-    
+    cudaMemset(h_centers, 0, k * d * sizeof(DATA_TYPE));
+
+    //printf("POINTS\n");
+    for (uint32_t i = 0; i < n; ++i) {
+      for (uint32_t j = 0; j < d; ++j) {
+        //printf("%.3f, ", h_points[i * d + j]);
+        h_centers[h_points_clusters[i] * d + j] += h_points[i * d + j];
+      }
+      //printf("%d\n", h_points_clusters[i]);
+    } 
+
+    #if PERFORMANCES_KERNEL_CENTERS
+      cudaEvent_t e_perf_cent_start, e_perf_cent_stop;
+      cudaEventCreate(&e_perf_cent_start);
+      cudaEventCreate(&e_perf_cent_stop);
+      cudaEventRecord(e_perf_cent_start);
+    #endif
 
     /* COMPUTE NEW CENTERS */
-    cudaMemset(d_centers, 0, k * d * sizeof(DATA_TYPE));
-    dim3 centers_grid_dim(n);
-    if (DEBUG_KERNELS_INVOKATION) printf(YELLOW "[KERNEL]" RESET "compute_centers: Grid (%d, %d, %d), Block (%d, %d, %d)\n", centers_grid_dim.x, centers_grid_dim.y, centers_grid_dim.z, d, 1, 1);
-    compute_centers<<<centers_grid_dim, d/*, k * d * sizeof(DATA_TYPE) */>>>(d_centers, d_points, d_points_clusters, d_clusters_len);
-    CHECK_LAST_CUDA_ERROR();
-
-    CHECK_CUDA_ERROR(cudaMemcpy(h_centers, d_centers, d * k * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost));
-    for (uint32_t i = 0; i < k; ++i)
-        for (uint32_t j = 0; j < d; ++j)
-          h_centers[i * d + j] /= h_clusters_len[i];
+    // cudaMemset(d_centers, 0, k * d * sizeof(DATA_TYPE));
+    // dim3 centers_grid_dim(n);
+    // if (DEBUG_KERNELS_INVOKATION) printf(YELLOW "[KERNEL]" RESET "compute_centers: Grid (%d, %d, %d), Block (%d, %d, %d)\n", centers_grid_dim.x, centers_grid_dim.y, centers_grid_dim.z, d, 1, 1);
+    // compute_centers<<<centers_grid_dim, d/*, k * d * sizeof(DATA_TYPE) */>>>(d_centers, d_points, d_points_clusters, d_clusters_len);
+    // CHECK_LAST_CUDA_ERROR();
+    // cudaDeviceSynchronize(); 
     
+    cudaMemset(d_centers, 0, k * d * sizeof(DATA_TYPE));
+    dim3 cent_block_dim(n > 32 ? next_pow_2((n + 1) / 2) : 32, d); 
+    dim3 cent_grid_dim(k);
+    int threads_tot = cent_block_dim.x * cent_block_dim.y;
+    while (threads_tot > deviceProps->maxThreadsPerBlock) {
+      cent_block_dim.x /= 2;
+      cent_grid_dim.y *= 2;
+      threads_tot = cent_block_dim.x * cent_block_dim.y;
+    }  
+    size_t cent_sh_mem = 0;
+    if (DEBUG_KERNELS_INVOKATION) printf(YELLOW "[KERNEL]" RESET " compute_centers: Grid (%u, %u, %u), Block (%u, %u, %u), Sh.mem. %luB\n", cent_grid_dim.x, cent_grid_dim.y, cent_grid_dim.z, cent_block_dim.x, cent_block_dim.y, cent_block_dim.z, cent_sh_mem);
+    compute_centers_shfl<<<cent_grid_dim, cent_block_dim, cent_sh_mem>>>(d_centers, d_points, d_points_clusters, n, d);
+    CHECK_LAST_CUDA_ERROR();
+    cudaDeviceSynchronize();    
+
+    #if PERFORMANCES_KERNEL_CENTERS
+      cudaEventRecord(e_perf_cent_stop);
+      cudaEventSynchronize(e_perf_cent_stop);
+      float e_perf_cent_ms = 0;
+      cudaEventElapsedTime(&e_perf_cent_ms, e_perf_cent_start, e_perf_cent_stop);
+      printf(CYAN "[PERFORMANCE]" RESET " compute_centers time: %.6f\n", e_perf_cent_ms / 1000);
+      cudaEventDestroy(e_perf_cent_start);
+      cudaEventDestroy(e_perf_cent_stop);
+    #endif
+    
+    CHECK_CUDA_ERROR(cudaMemcpy(h_centers, d_centers, d * k * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost));
+    
+    for (uint32_t i = 0; i < k; ++i)
+      for (uint32_t j = 0; j < d; ++j)
+        h_centers[i * d + j] /= h_clusters_len[i];    
 
     #if DEBUG_KERNEL_CENTERS
       printf("DEBUG_KERNEL_CENTERS\n");
@@ -337,12 +409,18 @@ uint64_t Kmeans::run (uint64_t maxiter) {
 
 bool Kmeans::cmpCenters () {
   const DATA_TYPE EPSILON = numeric_limits<DATA_TYPE>::epsilon();
-  for (uint32_t i = 0; i < k; ++i)
-        for (uint32_t j = 0; j < d; ++j)
-          if (fabs(h_centers[i * d + j] - h_last_centers[i * d + j]) >= EPSILON)
-            return false;
+  DATA_TYPE dist_sum = 0, norm = 0;
+  
+  for (size_t i = 0; i < k; ++i) {
+    for (size_t j = 0; j < d; ++j) {
+      DATA_TYPE dist = fabs(h_centers[i * d + j] - h_last_centers[i * d + j]);
+      dist_sum += dist * dist;
+      norm += h_last_centers[i * d + j] * h_last_centers[i * d + j];
+    }
+    if (sqrt(dist_sum) > EPSILON) { return false; }
+  }
+
   return true;
-  // return memcmp(h_centers, h_last_centers, CENTERS_BYTES);
 }
 
 void Kmeans::to_csv(ostream& o, char separator) {
