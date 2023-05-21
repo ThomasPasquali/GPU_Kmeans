@@ -11,28 +11,34 @@
  * 2: compute_distances_shfl
  */
 #define COMPUTE_DISTANCES_KERNEL 2
+/**
+ * @brief 
+ * 0: compute_centroids_shfl
+ * 1: compute_centroids_shfl_shrd
+ */
+#define COMPUTE_CENTROIDS_KERNEL 0
 
 class Kmeans {
   private:
     const size_t n;
     const unsigned int d, k;
-    const uint64_t POINTS_BYTES, CENTERS_BYTES;
+    const uint64_t POINTS_BYTES, CENTROIDS_BYTES;
     Point<DATA_TYPE>** points;
 
     DATA_TYPE* h_points;
-    DATA_TYPE* h_centers;
-    DATA_TYPE* h_last_centers;
+    DATA_TYPE* h_centroids;
+    DATA_TYPE* h_last_centroids;
     uint32_t*  h_points_clusters;
     DATA_TYPE* d_points;
-    DATA_TYPE* d_centers;
+    DATA_TYPE* d_centroids;
 
     cudaDeviceProp* deviceProps;
 
     /**
-     * @brief Select k random centers sampled form points
+     * @brief Select k random centroids sampled form points
      */
-    void initCenters(Point<DATA_TYPE>** points);
-    bool cmpCenters();
+    void init_centroids(Point<DATA_TYPE>** points);
+    bool cmp_centroids();
 
   public:
     Kmeans(size_t n, unsigned int d, unsigned int k, Point<DATA_TYPE>** points, cudaDeviceProp* deviceProps);
