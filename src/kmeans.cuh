@@ -11,6 +11,7 @@
  * 2: compute_distances_shfl
  */
 #define COMPUTE_DISTANCES_KERNEL 2
+#define COMPUTE_CENTERS_KERNEL 1
 
 class Kmeans {
   private:

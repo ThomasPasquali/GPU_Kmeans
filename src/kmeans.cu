@@ -10,6 +10,8 @@
 #include "kmeans.cuh"
 #include "../lib/cuda/utils.cuh"
 
+#define SHFL_MASK 0xffffffff
+
 using namespace std;
 
 random_device rd;
@@ -26,7 +28,6 @@ __host__ __device__ unsigned int next_pow_2(unsigned int x) {
   return ++x;
 }
 
-#define SHFL_MASK 0xffffffff
 /* Device kernels */
 __global__ void compute_distances_one_point_per_warp(DATA_TYPE* distances, DATA_TYPE* centers, DATA_TYPE* points) {
   const uint64_t point_offset = blockIdx.x * blockDim.x + threadIdx.x;
@@ -81,29 +82,6 @@ __global__ void compute_distances_shfl(DATA_TYPE* distances, DATA_TYPE* centers,
   }
 }
 
-__global__ void compute_centers(DATA_TYPE* centers, DATA_TYPE* points, uint32_t* points_clusters, uint64_t* clusters_len) {
-  uint32_t point   = blockIdx.x;
-  uint32_t cluster = points_clusters[point];
-  uint32_t d       = blockDim.x;
-  uint32_t d_i     = threadIdx.x;
-  // extern __shared__ DATA_TYPE centers_shared[];
-  
-  // if (point >= clusters_len[cluster]) { return; }
-
-  DATA_TYPE val = points[point * d + d_i];
-  
-  // if (cluster == 0 && d_i == 1) printf("cl: %u p: %u d: %u p_d: %.3f\n", cluster, point, d_i, val);
-  
-  // for (int i = next_pow_2(blockDim.x); i > 0; i /= 2) sum += __shfl_down_sync(SHFL_MASK, sum, i);
-  // atomicAdd(centers_shared + cluster * d + d_i, val);
-  // __syncthreads();
-  
-  //if (point == 0) {
-  atomicAdd(centers + cluster * d + d_i, val);
-  // if (cluster == 0 && d_i == 1) printf("blk: %u %u %u, part_sum: %.3f\n", blockIdx.x, blockIdx.y, threadIdx.x, centers[cluster * d + d_i]);
-  //}
-}
-
 __global__ void compute_centers_shfl(DATA_TYPE* centers, DATA_TYPE* points, uint32_t* points_clusters, uint64_t n, uint32_t d) {  
   uint32_t cluster_idx = 2 * blockIdx.y * blockDim.x + threadIdx.x;
   uint32_t point_idx   = cluster_idx * blockDim.y + threadIdx.y;
@@ -156,16 +134,17 @@ __global__ void compute_centers_shfl_shrd(DATA_TYPE* centers, DATA_TYPE* points,
     uint32_t shrd_idx   = threadIdx.y * shrd_dim_y + warp_idx;
     
     shrd_mem[shrd_idx] = val;
-    //__syncthreads();
+    __syncthreads();
     
     for (int offset = shrd_dim_y / 2; offset > 0; offset /= 2) {
       if (warp_idx < offset) {
         shrd_mem[shrd_idx] += shrd_mem[shrd_idx + offset];
       }
+      __syncthreads();
     }
 
     if (shrd_idx % shrd_dim_y == 0) {
-      centers[blockIdx.x * blockDim.y + threadIdx.y] = shrd_mem[shrd_idx];
+      atomicAdd(&centers[blockIdx.x * blockDim.y + threadIdx.y], shrd_mem[shrd_idx]);
     }
   }
 }
@@ -268,7 +247,20 @@ uint64_t Kmeans::run (uint64_t maxiter) {
     dim3 dist_block_dim(d);
     uint32_t dist_kernel_sh_mem = 0;
   #endif
-  
+
+  dim3 cent_grid_dim(k);
+  dim3 cent_block_dim((((int) n) > deviceProps->warpSize) ? next_pow_2((n + 1) / 2) : deviceProps->warpSize, d); 
+  int cent_threads_tot = cent_block_dim.x * cent_block_dim.y;
+  while (cent_threads_tot > deviceProps->maxThreadsPerBlock) {
+    cent_block_dim.x /= 2;
+    cent_grid_dim.y *= 2;
+    cent_threads_tot = cent_block_dim.x * cent_block_dim.y;
+  }  
+  #if COMPUTE_CENTERS_KERNEL == 1
+    size_t cent_sh_mem = (cent_block_dim.x / deviceProps->warpSize) * k * d * sizeof(DATA_TYPE);
+  #else
+    size_t cent_sh_mem = 0;
+  #endif
 
   /* MAIN LOOP */
   while (iter++ < maxiter) {
@@ -352,13 +344,24 @@ uint64_t Kmeans::run (uint64_t maxiter) {
     CHECK_CUDA_ERROR(cudaMemcpy(d_clusters_len, h_clusters_len, k * sizeof(uint64_t), cudaMemcpyHostToDevice));
     cudaMemset(h_centers, 0, k * d * sizeof(DATA_TYPE));
 
-    // for (uint32_t i = 0; i < n; ++i) {
-    //   for (uint32_t j = 0; j < d; ++j) {
-    //     //printf("%.3f, ", h_points[i * d + j]);
-    //     h_centers[h_points_clusters[i] * d + j] += h_points[i * d + j];
-    //   }
-    //   //printf("%d\n", h_points_clusters[i]);
-    // } 
+    for (uint32_t i = 0; i < n; ++i) {
+      for (uint32_t j = 0; j < d; ++j) {
+        //printf("%.3f, ", h_points[i * d + j]);
+        h_centers[h_points_clusters[i] * d + j] += h_points[i * d + j];
+      }
+      //printf("%d\n", h_points_clusters[i]);
+    } 
+
+    #if DEBUG_KERNEL_CENTERS
+      printf("DEBUG_KERNEL_CENTERS\n");
+      cout << endl << "CENTERS" << endl;
+      for (uint32_t i = 0; i < k; ++i) {
+        for (uint32_t j = 0; j < d; ++j)
+          printf("%.3f, ", h_centers[i * d + j]);
+        cout << endl;
+      }
+      cout << endl;
+    #endif
 
     #if PERFORMANCES_KERNEL_CENTERS
       cudaEvent_t e_perf_cent_start, e_perf_cent_stop;
@@ -367,28 +370,17 @@ uint64_t Kmeans::run (uint64_t maxiter) {
       cudaEventRecord(e_perf_cent_start);
     #endif
 
-    /* COMPUTE NEW CENTERS */
-    // cudaMemset(d_centers, 0, k * d * sizeof(DATA_TYPE));
-    // dim3 centers_grid_dim(n);
-    // if (DEBUG_KERNELS_INVOKATION) printf(YELLOW "[KERNEL]" RESET "compute_centers: Grid (%d, %d, %d), Block (%d, %d, %d)\n", centers_grid_dim.x, centers_grid_dim.y, centers_grid_dim.z, d, 1, 1);
-    // compute_centers<<<centers_grid_dim, d/*, k * d * sizeof(DATA_TYPE) */>>>(d_centers, d_points, d_points_clusters, d_clusters_len);
-    // CHECK_LAST_CUDA_ERROR();
-    // cudaDeviceSynchronize(); 
-    
+    cudaMemset(h_centers, 0, k * d * sizeof(DATA_TYPE));
     cudaMemset(d_centers, 0, k * d * sizeof(DATA_TYPE));
-    dim3 cent_block_dim((((int) n) > deviceProps->warpSize) ? next_pow_2((n + 1) / 2) : deviceProps->warpSize, d); 
-    dim3 cent_grid_dim(k);
-    int threads_tot = cent_block_dim.x * cent_block_dim.y;
-    while (threads_tot > deviceProps->maxThreadsPerBlock) {
-      cent_block_dim.x /= 2;
-      cent_grid_dim.y *= 2;
-      threads_tot = cent_block_dim.x * cent_block_dim.y;
-    }  
-    size_t cent_sh_mem = (cent_block_dim.x / deviceProps->warpSize) * k * d * sizeof(DATA_TYPE);
+
     if (DEBUG_KERNELS_INVOKATION) printf(YELLOW "[KERNEL]" RESET " compute_centers: Grid (%u, %u, %u), Block (%u, %u, %u), Sh.mem. %luB\n", cent_grid_dim.x, cent_grid_dim.y, cent_grid_dim.z, cent_block_dim.x, cent_block_dim.y, cent_block_dim.z, cent_sh_mem);
-    compute_centers_shfl_shrd<<<cent_grid_dim, cent_block_dim, cent_sh_mem>>>(d_centers, d_points, d_points_clusters, n, d);
-    CHECK_LAST_CUDA_ERROR();
-    cudaDeviceSynchronize();    
+    
+    #if COMPUTE_CENTERS_KERNEL == 1
+      compute_centers_shfl_shrd<<<cent_grid_dim, cent_block_dim, cent_sh_mem>>>(d_centers, d_points, d_points_clusters, n, d);
+    #else 
+      compute_centers_shfl<<<cent_grid_dim, cent_block_dim, cent_sh_mem>>>(d_centers, d_points, d_points_clusters, n, d);
+    #endif
+    CHECK_CUDA_ERROR(cudaDeviceSynchronize());    
 
     #if PERFORMANCES_KERNEL_CENTERS
       cudaEventRecord(e_perf_cent_stop);
@@ -400,7 +392,30 @@ uint64_t Kmeans::run (uint64_t maxiter) {
       cudaEventDestroy(e_perf_cent_stop);
     #endif
 
+    #if DEBUG_KERNEL_CENTERS
+      printf("DEBUG_KERNEL_CENTERS\n");
+      cout << endl << "CENTERS" << endl;
+      for (uint32_t i = 0; i < k; ++i) {
+        for (uint32_t j = 0; j < d; ++j)
+          printf("%.3f, ", h_centers[i * d + j]);
+        cout << endl;
+      }
+      cout << endl;
+    #endif
+
     CHECK_CUDA_ERROR(cudaMemcpy(h_centers, d_centers, d * k * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost));
+
+    #if DEBUG_KERNEL_CENTERS
+      printf("DEBUG_KERNEL_CENTERS\n");
+      cout << endl << "CENTERS" << endl;
+      for (uint32_t i = 0; i < k; ++i) {
+        for (uint32_t j = 0; j < d; ++j)
+          printf("%.3f, ", h_centers[i * d + j]);
+        cout << endl;
+      }
+      cout << endl;
+    #endif
+    exit(0);
     
     for (uint32_t i = 0; i < k; ++i)
       for (uint32_t j = 0; j < d; ++j)
