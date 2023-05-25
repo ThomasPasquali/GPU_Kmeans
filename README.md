@@ -23,8 +23,7 @@ python3 py_utils/data_generator.py -n 100 -d 3 -min 0 -max 10 | python3 py_utils
 
 ## K-means
 
-```bash
-make clean all && cat 3Dpoints.csv | ./bin/src/main -d 3 -n 10 -k 4 -m 1000 -o res.csv
+```bashmake clean all && cat datasets/3Dpoints.csv | ./bin/src/main -d 3 -n 1000 -k 20 -m 1000 -o out/GPU_Kmeans/res.csv
 cat datasets/A_N3000_D2_K20.csv | ./bin/src/main -d 2 -n 3000 -k 20 -m 1000 -o out/GPU_Kmeans/A_N3000_D2_K20.csv
 ```
 

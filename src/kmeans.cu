@@ -11,7 +11,7 @@
 #include "kmeans.cuh"
 #include "../lib/cuda/utils.cuh"
 
-#define SHFL_MASK 0xffffffff
+#define SHFL_MASK 0xFFFFFFFF
 
 using namespace std;
 
@@ -28,8 +28,6 @@ __host__ __device__ unsigned int next_pow_2(unsigned int x) {
   x |= x >> 16;
   return ++x;
 }
-
-#define SHFL_MASK 0xFFFFFFFF
 
 /*  DISTANCES KERNELS  */
 __global__ void compute_distances_one_point_per_warp(DATA_TYPE* distances, DATA_TYPE* centroids, DATA_TYPE* points) {
@@ -290,11 +288,8 @@ uint64_t Kmeans::run (uint64_t maxiter) {
   CHECK_CUDA_ERROR(cudaMallocHost(&h_points_clusters, n * sizeof(uint32_t)));
   uint64_t* h_clusters_len;
   CHECK_CUDA_ERROR(cudaMallocHost(&h_clusters_len, k * sizeof(uint64_t)));
-  uint64_t* d_clusters_len;
-  CHECK_CUDA_ERROR(cudaMalloc(&d_clusters_len, k * sizeof(uint64_t)));
 
   uint64_t iter = 0;
-  uint64_t max_cluster_len = 0;
 
   #if COMPUTE_DISTANCES_KERNEL == 1
     const uint32_t dist_max_points_per_warp = deviceProps->warpSize / d;
@@ -336,7 +331,7 @@ uint64_t Kmeans::run (uint64_t maxiter) {
   while (iter++ < maxiter) {
     /* COMPUTE DISTANCES */
     CHECK_CUDA_ERROR(cudaMemcpy(d_centroids, h_centroids, CENTROIDS_BYTES, cudaMemcpyHostToDevice));
-    if (DEBUG_KERNELS_INVOKATION) printf(YELLOW "[KERNEL]" RESET " compute_distances: Grid (%d, %d, %d), Block (%d, %d, %d), Sh.mem. %uB\n", dist_grid_dim.x, dist_grid_dim.y, dist_grid_dim.z, dist_block_dim.x, dist_block_dim.y, dist_block_dim.z, dist_kernel_sh_mem);
+    if (DEBUG_KERNELS_INVOKATION) printf(YELLOW "[KERNEL]" RESET " %-25s: Grid (%4u, %4u, %4u), Block (%4u, %4u, %4u), Sh.mem. %uB\n", "compute_distances", dist_grid_dim.x, dist_grid_dim.y, dist_grid_dim.z, dist_block_dim.x, dist_block_dim.y, dist_block_dim.z, dist_kernel_sh_mem);
     #if PERFORMANCES_KERNEL_DISTANCES
       cudaEvent_t e_perf_dist_start, e_perf_dist_stop;
       cudaEventCreate(&e_perf_dist_start);
@@ -356,7 +351,7 @@ uint64_t Kmeans::run (uint64_t maxiter) {
       cudaEventSynchronize(e_perf_dist_stop);
       float e_perf_dist_ms = 0;
       cudaEventElapsedTime(&e_perf_dist_ms, e_perf_dist_start, e_perf_dist_stop);
-      printf(CYAN "[PERFORMANCE]" RESET " compute_distances time: %.6f\n", e_perf_dist_ms / 1000);
+      printf(CYAN "[PERFORMANCE]" RESET " compute_distances time: %.8f\n", e_perf_dist_ms / 1000);
       cudaEventDestroy(e_perf_dist_start);
       cudaEventDestroy(e_perf_dist_stop);
     #endif
@@ -376,6 +371,12 @@ uint64_t Kmeans::run (uint64_t maxiter) {
     /* ASSIGN POINTS TO NEW CLUSTERS */
     #if DEBUG_KERNEL_ARGMIN
       printf(GREEN "[DEBUG_KERNEL_ARGMIN]\n" RESET);
+    #endif
+    #if PERFORMANCES_KERNEL_ARGMIN
+      cudaEvent_t e_perf_argmin_start, e_perf_argmin_stop;
+      cudaEventCreate(&e_perf_argmin_start);
+      cudaEventCreate(&e_perf_argmin_stop);
+      cudaEventRecord(e_perf_argmin_start);
     #endif
     #if ARGMIN_KERNEL == 0
       memset(h_clusters_len, 0, k * sizeof(uint64_t));
@@ -403,16 +404,23 @@ uint64_t Kmeans::run (uint64_t maxiter) {
         #endif
 
         ++h_clusters_len[argmin_idx];
-        max_cluster_len = max_cluster_len > h_clusters_len[argmin_idx] ? max_cluster_len : h_clusters_len[argmin_idx];
         h_points_clusters[i] = argmin_idx;
       }
       CHECK_CUDA_ERROR(cudaMemcpy(d_points_clusters, h_points_clusters, n * sizeof(uint32_t), cudaMemcpyHostToDevice));
-      CHECK_CUDA_ERROR(cudaMemcpy(d_clusters_len, h_clusters_len, k * sizeof(uint64_t), cudaMemcpyHostToDevice));
     #else
       DATA_TYPE infty = numeric_limits<DATA_TYPE>::infinity();
-      if (DEBUG_KERNELS_INVOKATION) printf(YELLOW "[KERNEL]" RESET " clusters_argmin_shfl: Grid (%d, %d, %d), Block (%d, %d, %d), Sh.mem. %uB\n", argmin_grid_dim.x, argmin_grid_dim.y, argmin_grid_dim.z, argmin_block_dim.x, argmin_block_dim.y, argmin_block_dim.z, argmin_kernel_sh_mem);
+      if (DEBUG_KERNELS_INVOKATION) printf(YELLOW "[KERNEL]" RESET " %-25s: Grid (%4u, %4u, %4u), Block (%4u, %4u, %4u), Sh.mem. %uB\n", "clusters_argmin_shfl", argmin_grid_dim.x, argmin_grid_dim.y, argmin_grid_dim.z, argmin_block_dim.x, argmin_block_dim.y, argmin_block_dim.z, argmin_kernel_sh_mem);
       clusters_argmin_shfl<<<argmin_grid_dim, argmin_block_dim, argmin_kernel_sh_mem>>>(n, k, d_distances, d_points_clusters, argmin_warps_per_block, infty);
       cudaDeviceSynchronize();
+    #endif
+    #if PERFORMANCES_KERNEL_CENTROIDS
+      cudaEventRecord(e_perf_argmin_stop);
+      cudaEventSynchronize(e_perf_argmin_stop);
+      float e_perf_argmin_ms = 0;
+      cudaEventElapsedTime(&e_perf_argmin_ms, e_perf_argmin_start, e_perf_argmin_stop);
+      printf(CYAN "[PERFORMANCE]" RESET " clusters_argmin_shfl time: %.8f\n", e_perf_argmin_ms / 1000);
+      cudaEventDestroy(e_perf_argmin_stop);
+      cudaEventDestroy(e_perf_argmin_start);
     #endif
     #if DEBUG_KERNEL_ARGMIN
       #if ARGMIN_KERNEL == 1
@@ -426,12 +434,9 @@ uint64_t Kmeans::run (uint64_t maxiter) {
       #endif
       printf("\n");
     #endif
-    
-    // TODO is it really needed d_clusters_len??? 
 
     /* COMPUTE NEW CENTROIDS */
-    CHECK_CUDA_ERROR(cudaMemcpy(d_points_clusters, h_points_clusters, n * sizeof(uint32_t), cudaMemcpyHostToDevice));
-    CHECK_CUDA_ERROR(cudaMemcpy(d_clusters_len, h_clusters_len, k * sizeof(uint64_t), cudaMemcpyHostToDevice));
+    
     CHECK_CUDA_ERROR(cudaMemset(h_centroids, 0, k * d * sizeof(DATA_TYPE)));
     CHECK_CUDA_ERROR(cudaMemset(d_centroids, 0, k * d * sizeof(DATA_TYPE)));
 
@@ -442,7 +447,7 @@ uint64_t Kmeans::run (uint64_t maxiter) {
       cudaEventRecord(e_perf_cent_start);
     #endif
 
-    if (DEBUG_KERNELS_INVOKATION) printf(YELLOW "[KERNEL]" RESET " compute_centroids: Grid (%u, %u, %u), Block (%u, %u, %u), Sh.mem. %luB\n", cent_grid_dim.x, cent_grid_dim.y, cent_grid_dim.z, cent_block_dim.x, cent_block_dim.y, cent_block_dim.z, cent_sh_mem);
+    if (DEBUG_KERNELS_INVOKATION) printf(YELLOW "[KERNEL]" RESET " %-25s: Grid (%4u, %4u, %4u), Block (%4u, %4u, %4u), Sh.mem. %luB\n", "compute_centroids", cent_grid_dim.x, cent_grid_dim.y, cent_grid_dim.z, cent_block_dim.x, cent_block_dim.y, cent_block_dim.z, cent_sh_mem);
     
     #if COMPUTE_CENTROIDS_KERNEL == 1
       compute_centroids_shfl_shrd<<<cent_grid_dim, cent_block_dim, cent_sh_mem>>>(d_centroids, d_points, d_points_clusters, n, d);
@@ -456,7 +461,7 @@ uint64_t Kmeans::run (uint64_t maxiter) {
       cudaEventSynchronize(e_perf_cent_stop);
       float e_perf_cent_ms = 0;
       cudaEventElapsedTime(&e_perf_cent_ms, e_perf_cent_start, e_perf_cent_stop);
-      printf(CYAN "[PERFORMANCE]" RESET " compute_centroids time: %.6f\n", e_perf_cent_ms / 1000);
+      printf(CYAN "[PERFORMANCE]" RESET " compute_centroids time: %.8f\n", e_perf_cent_ms / 1000);
       cudaEventDestroy(e_perf_cent_start);
       cudaEventDestroy(e_perf_cent_stop);
     #endif
@@ -513,16 +518,14 @@ uint64_t Kmeans::run (uint64_t maxiter) {
   /* MAIN LOOP END */
 
   /* COPY BACK RESULTS*/
+  CHECK_CUDA_ERROR(cudaMemcpy(h_points_clusters, d_points_clusters, n * sizeof(uint32_t), cudaMemcpyDeviceToHost));
   for (size_t i = 0; i < n; i++) {
     points[i]->setCluster(h_points_clusters[i]);
   }
   
-
   /* FREE MEMORY */
-  CHECK_CUDA_ERROR(cudaMalloc(&d_clusters_len, k * sizeof(uint64_t)));
   CHECK_CUDA_ERROR(cudaFree(d_distances));
   CHECK_CUDA_ERROR(cudaFree(d_points_clusters));
-  CHECK_CUDA_ERROR(cudaFree(d_clusters_len));
   CHECK_CUDA_ERROR(cudaFreeHost(h_clusters_len));
 
   return converged;
