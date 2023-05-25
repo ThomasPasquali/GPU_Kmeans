@@ -18,6 +18,13 @@
  */
 #define COMPUTE_CENTROIDS_KERNEL 0
 
+/**
+ * @brief 
+ * 0: DeviceReduce::ArgMin
+ * 1: clusters_argmin_shfl
+ */
+#define ARGMIN_KERNEL 1
+
 class Kmeans {
   private:
     const size_t n;
