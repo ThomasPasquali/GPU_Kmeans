@@ -238,7 +238,11 @@ void Kmeans::init_centroids (Point<DATA_TYPE>** points) {
       ++i;
     }
   }
-  if (DEBUG_INIT_CENTROIDS) { cout << endl << "Centroids" << endl; for (i = 0; i < k; ++i) cout << *(centroids[i]) << endl; }
+  #if DEBUG_INIT_CENTROIDS
+    cout << endl << "Centroids" << endl; 
+    for (i = 0; i < k; ++i) 
+      cout << *(centroids[i]) << endl;
+  #endif
 
   CHECK_CUDA_ERROR(cudaHostAlloc(&h_centroids, CENTROIDS_BYTES, cudaHostAllocDefault));
   for (size_t i = 0; i < k; ++i) {
@@ -369,7 +373,7 @@ uint64_t Kmeans::run (uint64_t maxiter) {
 
 
     /* ASSIGN POINTS TO NEW CLUSTERS */
-    #if DEBUG_KERNEL_ARGMIN
+    #if DEBUG_KERNEL_ARGMIN && ARGMIN_KERNEL == 0
       printf(GREEN "[DEBUG_KERNEL_ARGMIN]\n" RESET);
     #endif
     #if PERFORMANCES_KERNEL_ARGMIN
@@ -423,7 +427,10 @@ uint64_t Kmeans::run (uint64_t maxiter) {
       cudaEventDestroy(e_perf_argmin_start);
     #endif
     #if DEBUG_KERNEL_ARGMIN
-      #if ARGMIN_KERNEL == 1
+      #if ARGMIN_KERNEL == 0
+        printf("\n");
+      #elif ARGMIN_KERNEL == 1
+        printf(GREEN "[DEBUG_KERNEL_ARGMIN]\n" RESET);
         uint32_t tmp1[n];
         CHECK_CUDA_ERROR(cudaMemcpy(tmp1, d_points_clusters, n * sizeof(uint32_t), cudaMemcpyDeviceToHost));
         cudaDeviceSynchronize();
@@ -432,7 +439,6 @@ uint64_t Kmeans::run (uint64_t maxiter) {
             printf("%-2u -> %-2u\n", i, tmp1[i]);
         cout << RESET << endl;
       #endif
-      printf("\n");
     #endif
 
     /* COMPUTE NEW CENTROIDS */
@@ -472,7 +478,7 @@ uint64_t Kmeans::run (uint64_t maxiter) {
           h_centroids[h_points_clusters[i] * d + j] += h_points[i * d + j];
         }
       } 
-      cout << "DEBUG_KERNEL_CENTROIDS" << endl;
+      cout << GREEN "[DEBUG_KERNEL_CENTROIDS]" << endl;
       cout << endl << "POINTS CLUSTERS SUMS (CPU)" << endl;
       for (uint32_t i = 0; i < k; ++i) {
         for (uint32_t j = 0; j < d; ++j)
@@ -508,7 +514,7 @@ uint64_t Kmeans::run (uint64_t maxiter) {
           printf("%.3f, ", h_centroids[i * d + j]);
         cout << endl;
       }
-      cout << endl;
+      cout << RESET << endl;
     #endif
 
     /* CHECK IF CONVERGED */
