@@ -15,9 +15,9 @@
 /**
  * @brief 
  * 0: DeviceReduce::ArgMin
- * 1: argmin_shfl
+ * 1: clusters_argmin_shfl
  */
-#define ARGMIN_KERNEL 0
+#define ARGMIN_KERNEL 1
 
 class Kmeans {
   private:
