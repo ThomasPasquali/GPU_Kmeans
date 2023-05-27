@@ -111,7 +111,7 @@ __device__ Pair warp_argmin (float a) {
   return t;
 }
 
-__global__ void clusters_argmin_shfl(const uint32_t n, const uint32_t k, float* d_distances, uint32_t* points_clusters,  uint32_t* clusters_len, uint32_t warps_per_block, DATA_TYPE infty) {
+__global__ void clusters_argmin_shfl(const uint32_t n, const uint32_t k, float* d_distances, uint32_t* points_clusters,  uint64_t* clusters_len, uint32_t warps_per_block, DATA_TYPE infty) {
   extern __shared__ Pair shrd[];
   const uint32_t tid = threadIdx.x;
   const uint32_t lane = tid % warpSize;
