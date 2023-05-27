@@ -11,12 +11,6 @@
  * 2: compute_distances_shfl
  */
 #define COMPUTE_DISTANCES_KERNEL 2
-/**
- * @brief 
- * 0: compute_centroids_shfl
- * 1: compute_centroids_shfl_shrd
- */
-#define COMPUTE_CENTROIDS_KERNEL 0
 
 /**
  * @brief 
@@ -24,6 +18,13 @@
  * 1: clusters_argmin_shfl
  */
 #define ARGMIN_KERNEL 1
+
+/**
+ * @brief 
+ * 0: compute_centroids_shfl
+ * 1: compute_centroids_shfl_shrd
+ */
+#define COMPUTE_CENTROIDS_KERNEL 0
 
 class Kmeans {
   private:

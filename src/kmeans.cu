@@ -111,7 +111,7 @@ __device__ Pair warp_argmin (float a) {
   return t;
 }
 
-__global__ void clusters_argmin_shfl(const uint32_t n, const uint32_t k, float* d_distances, uint32_t* points_clusters,  uint64_t* clusters_len, uint32_t warps_per_block, DATA_TYPE infty) {
+__global__ void clusters_argmin_shfl(const uint32_t n, const uint32_t k, float* d_distances, uint32_t* points_clusters,  uint32_t* clusters_len, uint32_t warps_per_block, DATA_TYPE infty) {
   extern __shared__ Pair shrd[];
   const uint32_t tid = threadIdx.x;
   const uint32_t lane = tid % warpSize;
@@ -141,12 +141,12 @@ __global__ void clusters_argmin_shfl(const uint32_t n, const uint32_t k, float* 
       }
     }
     points_clusters[blockIdx.x] = minI;
-    ++clusters_len[minI]; // TODO in shared
+    atomicAdd(&clusters_len[minI], 1); // TODO optimization (if possible...)
   }
 }
 
 /*  CENTERS KERNELS  */
-__global__ void compute_centroids_shfl(DATA_TYPE* centroids, DATA_TYPE* points, uint32_t* points_clusters, uint64_t n, uint32_t d) {  
+__global__ void compute_centroids_shfl(DATA_TYPE* centroids, DATA_TYPE* points, uint32_t* points_clusters, uint32_t* clusters_len, uint64_t n, uint32_t d) {  
   uint32_t cluster_idx = 2 * blockIdx.y * blockDim.x + threadIdx.x;
   uint32_t point_idx   = cluster_idx * blockDim.y + threadIdx.y;
   uint32_t cluster_off = blockDim.x;
@@ -167,11 +167,14 @@ __global__ void compute_centroids_shfl(DATA_TYPE* centroids, DATA_TYPE* points, 
   }
   
   if (threadIdx.x % warpSize == 0) {
+    uint32_t count = clusters_len[blockIdx.x] > 1 ? clusters_len[blockIdx.x] : 1; 
+    DATA_TYPE scale = 1.0 / ((double) count); 
+    val *= scale;   
     atomicAdd(&centroids[blockIdx.x * blockDim.y + threadIdx.y], val);
   }
 }
 
-__global__ void compute_centroids_shfl_shrd(DATA_TYPE* centroids, DATA_TYPE* points, uint32_t* points_clusters, uint64_t n, uint32_t d) {  
+__global__ void compute_centroids_shfl_shrd(DATA_TYPE* centroids, DATA_TYPE* points, uint32_t* points_clusters, uint32_t* clusters_len, uint64_t n, uint32_t d) {  
   uint32_t cluster_idx = 2 * blockIdx.y * blockDim.x + threadIdx.x;
   uint32_t point_idx   = cluster_idx * blockDim.y + threadIdx.y;
   uint32_t cluster_off = blockDim.x;
@@ -208,7 +211,10 @@ __global__ void compute_centroids_shfl_shrd(DATA_TYPE* centroids, DATA_TYPE* poi
     }
 
     if (shrd_idx % shrd_dim_y == 0) {
-      atomicAdd(&centroids[blockIdx.x * blockDim.y + threadIdx.y], shrd_mem[shrd_idx]);
+      uint32_t count = clusters_len[blockIdx.x] > 1 ? clusters_len[blockIdx.x] : 1; 
+      DATA_TYPE scale = 1.0 / ((double) count); 
+      val = shrd_mem[shrd_idx] * scale;   
+      atomicAdd(&centroids[blockIdx.x * blockDim.y + threadIdx.y], val);
     }
   }
 }
@@ -291,10 +297,8 @@ uint64_t Kmeans::run (uint64_t maxiter) {
   uint32_t* d_points_clusters;
   CHECK_CUDA_ERROR(cudaMalloc(&d_points_clusters, n * sizeof(uint32_t)));
   CHECK_CUDA_ERROR(cudaMallocHost(&h_points_clusters, n * sizeof(uint32_t)));
-  uint64_t* h_clusters_len;
-  CHECK_CUDA_ERROR(cudaMallocHost(&h_clusters_len, k * sizeof(uint64_t)));
-  uint64_t* d_clusters_len;
-  CHECK_CUDA_ERROR(cudaMalloc(&d_clusters_len, k * sizeof(uint64_t)));
+  uint32_t* d_clusters_len;
+  CHECK_CUDA_ERROR(cudaMalloc(&d_clusters_len, k * sizeof(uint32_t)));
 
   uint64_t iter = 0;
 
@@ -415,7 +419,7 @@ uint64_t Kmeans::run (uint64_t maxiter) {
       }
       CHECK_CUDA_ERROR(cudaMemcpy(d_points_clusters, h_points_clusters, n * sizeof(uint32_t), cudaMemcpyHostToDevice));
     #else
-      CHECK_CUDA_ERROR(cudaMemset(d_clusters_len, 0, k));
+      CHECK_CUDA_ERROR(cudaMemset(d_clusters_len, 0, k * sizeof(uint32_t)));
       DATA_TYPE infty = numeric_limits<DATA_TYPE>::infinity();
       if (DEBUG_KERNELS_INVOKATION) printf(YELLOW "[KERNEL]" RESET " %-25s: Grid (%4u, %4u, %4u), Block (%4u, %4u, %4u), Sh.mem. %uB\n", "clusters_argmin_shfl", argmin_grid_dim.x, argmin_grid_dim.y, argmin_grid_dim.z, argmin_block_dim.x, argmin_block_dim.y, argmin_block_dim.z, argmin_kernel_sh_mem);
       clusters_argmin_shfl<<<argmin_grid_dim, argmin_block_dim, argmin_kernel_sh_mem>>>(n, k, d_distances, d_points_clusters, d_clusters_len, argmin_warps_per_block, infty);
@@ -460,9 +464,9 @@ uint64_t Kmeans::run (uint64_t maxiter) {
     if (DEBUG_KERNELS_INVOKATION) printf(YELLOW "[KERNEL]" RESET " %-25s: Grid (%4u, %4u, %4u), Block (%4u, %4u, %4u), Sh.mem. %luB\n", "compute_centroids", cent_grid_dim.x, cent_grid_dim.y, cent_grid_dim.z, cent_block_dim.x, cent_block_dim.y, cent_block_dim.z, cent_sh_mem);
     
     #if COMPUTE_CENTROIDS_KERNEL == 1
-      compute_centroids_shfl_shrd<<<cent_grid_dim, cent_block_dim, cent_sh_mem>>>(d_centroids, d_points, d_points_clusters, n, d);
+      compute_centroids_shfl_shrd<<<cent_grid_dim, cent_block_dim, cent_sh_mem>>>(d_centroids, d_points, d_points_clusters, d_clusters_len, n, d);
     #else 
-      compute_centroids_shfl<<<cent_grid_dim, cent_block_dim>>>(d_centroids, d_points, d_points_clusters, n, d);
+      compute_centroids_shfl<<<cent_grid_dim, cent_block_dim>>>(d_centroids, d_points, d_points_clusters, d_clusters_len, n, d);
     #endif
     CHECK_CUDA_ERROR(cudaDeviceSynchronize());    
 
@@ -477,51 +481,43 @@ uint64_t Kmeans::run (uint64_t maxiter) {
     #endif
 
     #if DEBUG_KERNEL_CENTROIDS
-      // CHECK_CUDA_ERROR(cudaMemcpy(h_centroids, d_centroids, d * k * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost));
+      uint32_t* h_clusters_len;
+      CHECK_CUDA_ERROR(cudaMallocHost(&h_clusters_len, k * sizeof(uint32_t)));
+      CHECK_CUDA_ERROR(cudaMemcpy(h_points_clusters, d_points_clusters, n * sizeof(uint32_t), cudaMemcpyDeviceToHost));
+      CHECK_CUDA_ERROR(cudaMemcpy(h_clusters_len,    d_clusters_len,    k * sizeof(uint32_t), cudaMemcpyDeviceToHost));
       for (uint32_t i = 0; i < n; ++i) {
         for (uint32_t j = 0; j < d; ++j) {
           h_centroids[h_points_clusters[i] * d + j] += h_points[i * d + j];
         }
       } 
+      for (uint32_t i = 0; i < k; ++i) {
+        for (uint32_t j = 0; j < d; ++j) {
+          uint64_t count = h_clusters_len[i] > 1 ? h_clusters_len[i] : 1; 
+          DATA_TYPE scale = 1.0 / ((double) count); 
+          h_centroids[i * d + j] *= scale;    
+        }
+      } 
       cout << GREEN "[DEBUG_KERNEL_CENTROIDS]" << endl;
-      cout << endl << "POINTS CLUSTERS SUMS (CPU)" << endl;
+      cout << endl << "CENTROIDS (CPU)" << endl;
       for (uint32_t i = 0; i < k; ++i) {
         for (uint32_t j = 0; j < d; ++j)
           printf("%.3f, ", h_centroids[i * d + j]);
         cout << endl;
       }
-    #endif
-
-    CHECK_CUDA_ERROR(cudaMemcpy(h_centroids, d_centroids, d * k * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost));
-
-    #if DEBUG_KERNEL_CENTROIDS
-      cout << endl << "POINTS CLUSTERS SUMS (GPU)" << endl;
-      for (uint32_t i = 0; i < k; ++i) {
-        for (uint32_t j = 0; j < d; ++j)
-          printf("%.3f, ", h_centroids[i * d + j]);
-        cout << endl;
-      }
-    #endif
-
-    /* SCALE CENTROIDS SUMS */
-    for (uint32_t i = 0; i < k; ++i) {
-      for (uint32_t j = 0; j < d; ++j) {
-        uint64_t count = h_clusters_len[i] > 1 ? h_clusters_len[i] : 1; 
-        DATA_TYPE scale = 1.0 / ((double) count); 
-        h_centroids[i * d + j] *= scale;    
-      }
-    }        
-
-    #if DEBUG_KERNEL_CENTROIDS
-      cout << endl << "CENTROIDS" << endl;
+      CHECK_CUDA_ERROR(cudaMemset(h_centroids, 0, d * k * sizeof(DATA_TYPE)));     
+      CHECK_CUDA_ERROR(cudaMemcpy(h_centroids, d_centroids, d * k * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost));
+      cout << endl << "CENTROIDS (GPU)" << endl;
       for (uint32_t i = 0; i < k; ++i) {
         for (uint32_t j = 0; j < d; ++j)
           printf("%.3f, ", h_centroids[i * d + j]);
         cout << endl;
       }
       cout << RESET << endl;
+      CHECK_CUDA_ERROR(cudaFreeHost(h_clusters_len));
     #endif
 
+    CHECK_CUDA_ERROR(cudaMemcpy(h_centroids, d_centroids, d * k * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost));
+    
     /* CHECK IF CONVERGED */
     if (iter > 1 && cmp_centroids()) { converged = iter; break; } // Exit
     else { memcpy(h_last_centroids, h_centroids, CENTROIDS_BYTES); } // Copy current centroids
@@ -537,7 +533,7 @@ uint64_t Kmeans::run (uint64_t maxiter) {
   /* FREE MEMORY */
   CHECK_CUDA_ERROR(cudaFree(d_distances));
   CHECK_CUDA_ERROR(cudaFree(d_points_clusters));
-  CHECK_CUDA_ERROR(cudaFreeHost(h_clusters_len));
+  CHECK_CUDA_ERROR(cudaFree(d_clusters_len));
 
   return converged;
 }
