@@ -10,7 +10,7 @@
 #include "include/input_parser.hpp"
 #include "include/errors.hpp"
 #include "utils.cuh"
-#include "./kmeans.cuh"
+#include "kmeans.cuh"
 
 #define ARG_DIMENSIONS  0
 #define ARG_SAMPLES     1
