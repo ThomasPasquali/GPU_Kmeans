@@ -4,12 +4,12 @@
 #include <string>
 #include <fstream>
 
-#include "../include/common.h"
-#include "../include/colors.h"
-#include "../include/cxxopts.hpp"
-#include "../include/input_parser.hpp"
-#include "../include/errors.hpp"
-#include "../lib/cuda/utils.cuh"
+#include "include/common.h"
+#include "include/colors.h"
+#include "include/cxxopts.hpp"
+#include "include/input_parser.hpp"
+#include "include/errors.hpp"
+#include "utils.cuh"
 #include "./kmeans.cuh"
 
 #define ARG_DIMENSIONS  0

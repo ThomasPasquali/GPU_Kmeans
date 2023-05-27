@@ -6,10 +6,10 @@
 #include <cmath>
 #include <limits>
 
-#include "../include/common.h"
-#include "../include/colors.h"
+#include "include/common.h"
+#include "include/colors.h"
 #include "kmeans.cuh"
-#include "../lib/cuda/utils.cuh"
+#include "utils.cuh"
 
 #define SHFL_MASK 0xFFFFFFFF
 

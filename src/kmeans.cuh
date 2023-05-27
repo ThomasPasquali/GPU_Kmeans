@@ -1,8 +1,8 @@
 #ifndef __KMEANS__
 #define __KMEANS__
 
-#include "../include/common.h"
-#include "../include/point.hpp"
+#include "include/common.h"
+#include "include/point.hpp"
 
 /**
  * @brief 
