@@ -3,10 +3,10 @@ find_package(Catch2 3 REQUIRED)
 add_executable(
   unit_kernels 
   unit_kernels.cu
+  ../src/kernels/kernels.cuh
   ../src/kernels/argmin.cu 
-  ../src/kernels/argmin.cuh
+  ../src/kernels/centroids.cu 
   ../src/kernels/distances.cu 
-  ../src/kernels/distances.cuh
   )
 
 target_link_libraries(unit_kernels PRIVATE Catch2::Catch2WithMain)

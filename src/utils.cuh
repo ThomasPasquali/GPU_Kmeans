@@ -10,6 +10,7 @@ void check(cudaError err, const char* const func, const char* const file, const 
 void checkLast(const char* const file, const int line);
 
 void describeDevice (int dev, cudaDeviceProp& deviceProp);
+unsigned int next_pow_2(unsigned int x);
 
 #endif
 

@@ -1,28 +1,12 @@
-#include <stdint.h>
+#include "kernels.cuh"
 
-#include "distances.cuh"
-
-#include "../include/common.h"
-
-#define DISTANCES_SHFL_MASK 0xFFFFFFFF
-
-__host__ __device__ unsigned int _next_pow_2(unsigned int x) { // TODO try to fix
-  --x;
-  x |= x >> 1;
-  x |= x >> 2;
-  x |= x >> 4;
-  x |= x >> 8;
-  x |= x >> 16;
-  return ++x;
-}
-
-__global__ void compute_distances_one_point_per_warp(DATA_TYPE* distances, DATA_TYPE* centroids, DATA_TYPE* points) {
+__global__ void compute_distances_one_point_per_warp(DATA_TYPE* distances, DATA_TYPE* centroids, DATA_TYPE* points, uint32_t next_pow_2) {
   const uint64_t point_offset = blockIdx.x * blockDim.x + threadIdx.x;
   const uint64_t center_offset = blockIdx.y * blockDim.x + threadIdx.x;
   DATA_TYPE dist = points[point_offset] - centroids[center_offset];
   dist *= dist;
   
-  for (int i = _next_pow_2(blockDim.x); i > 0; i /= 2)
+  for (int i = next_pow_2; i > 0; i /= 2)
     dist += __shfl_down_sync(DISTANCES_SHFL_MASK, dist, i);
 
   if (threadIdx.x == 0) {
