@@ -163,9 +163,28 @@ Kmeans::Kmeans (size_t _n, unsigned int _d, unsigned int _k, Point<DATA_TYPE>** 
     }
   }
   CHECK_CUDA_ERROR(cudaMalloc(&d_points, POINTS_BYTES));
-  CHECK_CUDA_ERROR(cudaMemcpy(d_points, h_points, POINTS_BYTES, cudaMemcpyHostToDevice));
+
+  const float MAX_CPY_BYTES_PER_STREAM = 8192.0; // TODO find best value
+  const uint16_t streams_n = ceil(POINTS_BYTES / MAX_CPY_BYTES_PER_STREAM);
+  cudaStream_t streams[streams_n];
+  uint64_t offset, count;
+  
+  for (int i = 0; i < streams_n; ++i) {
+    cudaStreamCreate(&(streams[i]));
+    offset = MAX_CPY_BYTES_PER_STREAM * i;
+    count = MAX_CPY_BYTES_PER_STREAM;
+    if (i + 1 >= streams_n) {
+      count -= MAX_CPY_BYTES_PER_STREAM * streams_n - POINTS_BYTES;
+    }
+    cudaMemcpyAsync(d_points + offset, h_points + offset, sizeof(DATA_TYPE) * count, cudaMemcpyDeviceToHost, streams[i]);
+  }
+  // CHECK_CUDA_ERROR(cudaMemcpy(d_points, h_points, POINTS_BYTES, cudaMemcpyHostToDevice));
 
   init_centroids(_points);
+  cudaDeviceSynchronize();
+  for (int i = 0; i < streams_n; ++i) {
+    cudaStreamDestroy(streams[i]);
+  }
 }
 
 Kmeans::~Kmeans () {
