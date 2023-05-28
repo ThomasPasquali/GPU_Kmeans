@@ -2,6 +2,8 @@ add_executable(
   gpukmeans
   ./kernels/argmin.cu 
   ./kernels/argmin.cuh
+  ./kernels/distances.cu 
+  ./kernels/distances.cuh
   main.cu 
   kmeans.cu 
   kmeans.cuh 

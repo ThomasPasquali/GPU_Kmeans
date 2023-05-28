@@ -5,6 +5,8 @@ add_executable(
   unit_kernels.cu
   ../src/kernels/argmin.cu 
   ../src/kernels/argmin.cuh
+  ../src/kernels/distances.cu 
+  ../src/kernels/distances.cuh
   )
 
 target_link_libraries(unit_kernels PRIVATE Catch2::Catch2WithMain)
