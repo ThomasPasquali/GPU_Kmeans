@@ -3,6 +3,7 @@ add_executable(
   ./kernels/kernels.cuh
   ./kernels/argmin.cu
   ./kernels/centroids.cu 
+  ./kernels/distances.cu 
   main.cu 
   kmeans.cu 
   kmeans.cuh 
