@@ -1,7 +1,7 @@
 ## DIRECTORIES
 bin
 .vscode
-build/*
+build
 
 ## FILES
 out/*/*.csv
@@ -9,6 +9,3 @@ temp-plot.html
 
 ## Testing framework
 Catch2
-
-## CMake
-src/Makefile

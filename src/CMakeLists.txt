@@ -1,7 +1,8 @@
 add_executable(
   gpukmeans
-  ./kernels/argmin.cu 
-  ./kernels/argmin.cuh
+  ./kernels/kernels.cuh
+  ./kernels/argmin.cu
+  ./kernels/centroids.cu 
   main.cu 
   kmeans.cu 
   kmeans.cuh 

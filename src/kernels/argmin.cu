@@ -1,10 +1,4 @@
-#include <stdint.h>
-
-#include "argmin.cuh"
-
-#include "../include/common.h"
-
-#define ARGMIN_SHFL_MASK 0xFFFFFFFF
+#include "kernels.cuh"
 
 __device__ Pair shfl_xor_sync (Pair p, unsigned delta){
   return Pair{
