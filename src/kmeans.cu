@@ -83,12 +83,13 @@ Kmeans::Kmeans (size_t _n, unsigned int _d, unsigned int _k, Point<DATA_TYPE>** 
   
   for (int i = 0; i < streams_n; ++i) {
     cudaStreamCreate(&(streams[i]));
-    offset += MAX_CPY_VALUES_PER_STREAM;
     count = MAX_CPY_VALUES_PER_STREAM;
     if (i + 1 >= streams_n) {
       count -= MAX_CPY_VALUES_PER_STREAM * streams_n - (n * d);
     }
+    // printf("Stream %d  off: %lu count: %lu\n", i, offset, count);
     cudaMemcpyAsync(d_points + offset, h_points + offset, sizeof(DATA_TYPE) * count, cudaMemcpyDeviceToHost, streams[i]);
+    offset += count;
   }
   // CHECK_CUDA_ERROR(cudaMemcpy(d_points, h_points, POINTS_BYTES, cudaMemcpyHostToDevice));
 
