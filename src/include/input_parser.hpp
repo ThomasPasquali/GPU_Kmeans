@@ -5,7 +5,7 @@
 #include "point.hpp"
 
 #define SEPARATOR ","
-#define MAX_LINE  4096
+#define MAX_LINE  8192
 
 using namespace std;
 
@@ -26,6 +26,7 @@ class InputParser {
       for (size_t i = 0; i <= _n; i++) {
         char str[MAX_LINE] = { 0 };
         in >> str;
+        // printf("%s,\n", str);
         
         if (i == (size_t)0) { continue; }
         if (!str[0]) { break; }

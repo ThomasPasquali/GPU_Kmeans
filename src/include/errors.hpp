@@ -3,9 +3,10 @@
 
 #include <stdio.h>
 
-#define EXIT_ARGS       1
-#define EXIT_CUDA_DEV   2
-#define EXIT_POINT_IOB  3
+#define EXIT_ARGS             1
+#define EXIT_CUDA_DEV         2
+#define EXIT_POINT_IOB        3
+#define EXIT_INVALID_INFILE   4
 
 void printErrDesc (int errn) {
   switch (errn) {
@@ -17,6 +18,9 @@ void printErrDesc (int errn) {
     break;
   case EXIT_POINT_IOB:
     fprintf(stderr, "Point index out of bounds\n");
+    break;
+  case EXIT_INVALID_INFILE:
+    fprintf(stderr, "Invalid input file\n");
     break;
   default:
     fprintf(stderr, "No error description\n");
