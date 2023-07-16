@@ -75,7 +75,6 @@ int main(int argc, char **argv) {
     filebuf fb;
     if (fb.open(in_file, ios::in)) {
       istream file(&fb);
-      printf("%s  %s\n", in_file.c_str(), out_file.c_str());
       input = new InputParser<DATA_TYPE>(file, d, n);
       fb.close();
     } else {

@@ -1,19 +1,218 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <limits>
+#include <math.h>
+#include <cuda_runtime.h>
+#include <cublas_v2.h>
 
 #include "../src/kernels/kernels.cuh"
 #include "../src/utils.cuh"
 #include "../src/include/common.h"
 
 #define KERNEL_CENTROIDS 0
+#define TEST_DEBUG 0
+
+#define IDX2C(i,j,ld) (((j)*(ld))+(i))
 
 const DATA_TYPE infty   = numeric_limits<DATA_TYPE>::infinity();
 const DATA_TYPE EPSILON = numeric_limits<DATA_TYPE>::epsilon();
 
-#define TEST_DEBUG 1
 
-TEST_CASE("kernel_distances", "[kernel][distances]") {
+void printMatrix (DATA_TYPE* M, uint32_t rows, uint32_t cols) {
+  for (uint32_t i = 0; i < rows; ++i) {
+    for (uint32_t j = 0; j < cols; ++j) {
+      printf("%10.3f", M[IDX2C(i, j, rows)]);
+    }
+    printf("\n");
+  }
+}
+
+void printArray (DATA_TYPE* A, uint32_t len) {
+  for (uint32_t i = 0; i < len; ++i) {
+    printf("%10.3f", A[i]);
+  }
+}
+
+void initRandomMatrix (DATA_TYPE* M, uint32_t rows, uint32_t cols) {
+  for (uint32_t i = 0; i < rows; ++i) {
+    for (uint32_t j = 0; j < cols; ++j) {
+      //std::rand() / 100000005.32;
+      M[IDX2C(i, j, rows)] = ((int)trunc(std::rand() / 100000005.32)) % 6;
+    }
+  }
+}
+
+/**
+ * @brief 
+ * 
+ * @param C a matrix of size (d+1)x(d+1)
+ * @param center a vector of size d
+ * @param d number of dimensions
+ * @param ki index of the center
+ * @param ld number of rows of the matrix center
+ */
+void computeCentroidAssociatedMatrix (DATA_TYPE* C, DATA_TYPE* centers, uint32_t d, uint32_t ki, uint32_t ld) {
+  ++d; // d = d + 1
+  DATA_TYPE c;
+  DATA_TYPE c_11 = 0;
+  for (size_t i = 0; i < d - 1; ++i) { // Matrix borders
+    c = centers[IDX2C(ki, i, ld)];
+    C[i + 1] = -c;
+    C[(i + 1) * d] = -c;
+    c_11 += c * c;
+  }
+  C[0] = c_11;
+  for (size_t i = 1; i < d; ++i) { // Matrix diagonal + fill with 0s 
+    for (size_t j = 1; j < d; ++j) {
+      C[i * d + j] = i == j ? 1 : 0;
+    }
+  }
+}
+
+TEST_CASE("kernel_distances_matrix", "[kernel][distances]") {
+  const unsigned int TESTS_N = 8;
+  const unsigned int N[TESTS_N] = {10, 10, 17, 30, 17,   15,  500, 1056};
+  const unsigned int D[TESTS_N] = { 1,  2,  3, 11, 42, 1500,  500,  700};
+  const unsigned int K[TESTS_N] = { 2,  6,  3, 11, 20,    5,  100,  506};
+
+  for (int test_i = 6; test_i < 7; ++test_i) {
+    printf("TTTTT %d\n", test_i);
+    const unsigned int n = N[test_i];
+    const unsigned int d = D[test_i];
+    const unsigned int d1 = d + 1;
+    const unsigned int k = K[test_i];
+
+    char test_name[50];
+    sprintf(test_name, "kernel compute_distances_matrix n: %u  d: %u  k: %u", n, d, k);
+    SECTION(test_name) {
+
+      const unsigned int m = n > d1 ? n : d1;
+      DATA_TYPE *h_points = new DATA_TYPE[n * d1];
+      DATA_TYPE *h_centroids = new DATA_TYPE[k * d];
+      DATA_TYPE *h_distances = new DATA_TYPE[n];
+      DATA_TYPE *h_res = new DATA_TYPE[m * m];
+
+      // Constructing P
+      initRandomMatrix(h_points, n, d1);
+      for (size_t i = 0; i < n; ++i) {
+        h_points[i] = 1;
+      }
+      if (TEST_DEBUG) {
+        printf("\nPOINTS:\n");
+        printMatrix(h_points, n, d1);
+      }
+
+      // Constructing C
+      initRandomMatrix(h_centroids, k, d);
+      if (TEST_DEBUG) {
+        printf("\nCENTERS:\n");
+        printMatrix(h_centroids, k, d);
+      }
+
+      cublasStatus_t stat;
+      cublasHandle_t handle;
+      DATA_TYPE* d_C;
+      cudaMalloc(&d_C, d1 * d1 * sizeof(DATA_TYPE));
+      DATA_TYPE* d_P;
+      cudaMalloc(&d_P, n * d1 * sizeof(DATA_TYPE));
+      DATA_TYPE* d_RES;
+      cudaMalloc(&d_RES, m * m * sizeof(DATA_TYPE));
+
+      DATA_TYPE* h_C = new DATA_TYPE[d1 * d1];
+      for (uint32_t ki = 0; ki < k; ++ki) {
+        computeCentroidAssociatedMatrix(h_C, h_centroids, d, ki, k);
+        if (TEST_DEBUG) {
+          printf("\nCenter %u associated matrix:\n", ki);
+          printMatrix(h_C, d1, d1);
+        }
+
+        stat = cublasCreate(&handle);
+        if (stat != CUBLAS_STATUS_SUCCESS) {
+          printf ("CUBLAS initialization failed\n");
+          exit(EXIT_FAILURE);
+        }
+        stat = cublasSetMatrix (d1, d1, sizeof(DATA_TYPE), h_C, d1, d_C, d1);
+        if (stat != CUBLAS_STATUS_SUCCESS) {
+          printf ("data download failed");
+          cublasDestroy(handle);
+          exit(EXIT_FAILURE);
+        }
+        stat = cublasSetMatrix (n, d1, sizeof(DATA_TYPE), h_points, n, d_P, n);
+        if (stat != CUBLAS_STATUS_SUCCESS) {
+          printf ("data download failed");
+          cublasDestroy(handle);
+          exit(EXIT_FAILURE);
+        }
+        // Invoke the GEMM, ensuring k, lda, ldb, and ldc are all multiples of 8, 
+        // and m is a multiple of 4:
+        DATA_TYPE alpha = 1, beta = 0;
+        stat = cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, 
+                          n, d1, d1, &alpha,
+                          d_P, n,
+                          d_C, d1,
+                          &beta, d_RES, n);
+        stat = cublasGetMatrix (n, d1, sizeof(DATA_TYPE), d_RES, n, h_res, n);
+        if (stat != CUBLAS_STATUS_SUCCESS) {
+          printf ("data upload failed %d", stat);
+          cublasDestroy(handle);
+          exit(EXIT_FAILURE);
+        }
+        if (TEST_DEBUG) {
+          printf("\nRES:\n");
+          printMatrix(h_res, n, d1);
+        }
+
+        stat = cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_T, 
+                          n, n, d1, &alpha,
+                          d_RES, n,
+                          d_P, n,
+                          &beta, d_RES, n);
+        stat = cublasGetMatrix (n, n, sizeof(DATA_TYPE), d_RES, n, h_res, n);
+        if (stat != CUBLAS_STATUS_SUCCESS) {
+          printf ("data upload failed %d", stat);
+          cublasDestroy(handle);
+          exit(EXIT_FAILURE);
+        }
+        if (TEST_DEBUG) {
+          printf("\nRES:\n");
+          printMatrix(h_res, n, n);
+        }
+
+        for (size_t j = 0; j < n; ++j) {
+          h_distances[j] = h_res[IDX2C(j, j, n)];
+        }
+        if (TEST_DEBUG) printf("\n\n");
+
+        for (uint32_t ni = 0; ni < n; ++ni) {
+          DATA_TYPE cpu_dist = 0, tmp;
+          for (uint32_t di = 0; di < d; ++di) {
+            // printf("DD: %d (%d) - %d   %f\n", IDX2C(ni, di + 1, n), n*d1, IDX2C(ki, di, k), cpu_dist);
+            tmp = h_points[IDX2C(ni, di + 1, n)] - h_centroids[IDX2C(ki, di, k)];
+            cpu_dist += tmp * tmp;
+          }
+          DATA_TYPE gpu_dist = h_distances[ni];
+          if (TEST_DEBUG) printf("point: %u center: %u cmp: %.6f -- %.6f\n", ni, ki, gpu_dist, cpu_dist);
+          REQUIRE( gpu_dist - cpu_dist < EPSILON );
+        }
+        if (TEST_DEBUG) printf("\n\n");
+        cublasDestroy(handle);
+
+      }
+
+      delete h_C;
+      delete h_points;
+      delete h_centroids;
+      delete h_distances;
+      delete h_res;
+      cudaFree(d_C);
+      cudaFree(d_P);
+      cudaFree(d_RES);
+
+    }
+  }
+}
+
+TEST_CASE("kernel_distances_warp", "[kernel][distances]") {
   const unsigned int TESTS_N = 8;
   const unsigned int N[TESTS_N] = {10, 10, 17, 51, 159, 1000, 3456, 10056};
   const unsigned int D[TESTS_N] = { 1,  2,  3,  5,  11,   12,   24,    32};
@@ -148,7 +347,7 @@ TEST_CASE("kernel_argmin", "[kernel][argmin]") {
   }
 }
 
-TEST_CASE("kernel centroids", "[kernel][centroids]") {
+TEST_CASE("kernel_centroids", "[kernel][centroids]") {
   #define TESTS_N 8
   const unsigned int D[TESTS_N] = {2,  3,  10,  32,  50,  100, 1000, 1024};
   const unsigned int N[TESTS_N] = {2, 10, 100,  51, 159, 1000, 3456, 10056};

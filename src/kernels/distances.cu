@@ -36,8 +36,8 @@ __global__ void compute_distances_shmem(DATA_TYPE* distances, DATA_TYPE* centroi
 }
 
 __global__ void compute_distances_shfl(DATA_TYPE* distances, DATA_TYPE* centroids, DATA_TYPE* points, const uint32_t points_n, const uint32_t points_per_warp, const uint32_t d, const uint32_t d_closest_2_pow) {
-  const uint64_t point_i = (blockIdx.x * points_per_warp) + (threadIdx.x / d_closest_2_pow);
-  const uint64_t center_i = blockIdx.y;
+  const uint32_t point_i = (blockIdx.x * points_per_warp) + (threadIdx.x / d_closest_2_pow);
+  const uint32_t center_i = blockIdx.y;
   const uint32_t d_i = threadIdx.x % d_closest_2_pow;
 
   if (point_i < points_n && d_i < d) {
