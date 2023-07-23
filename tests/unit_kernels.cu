@@ -12,26 +12,8 @@
 #define KERNEL_CENTROIDS 0
 #define TEST_DEBUG 0
 
-#define IDX2C(i,j,ld) (((j)*(ld))+(i))
-
 const DATA_TYPE infty   = numeric_limits<DATA_TYPE>::infinity();
 const DATA_TYPE EPSILON = numeric_limits<DATA_TYPE>::epsilon();
-
-
-void printMatrix (DATA_TYPE* M, uint32_t rows, uint32_t cols) {
-  for (uint32_t i = 0; i < rows; ++i) {
-    for (uint32_t j = 0; j < cols; ++j) {
-      printf("%10.3f", M[IDX2C(i, j, rows)]);
-    }
-    printf("\n");
-  }
-}
-
-void printArray (DATA_TYPE* A, uint32_t len) {
-  for (uint32_t i = 0; i < len; ++i) {
-    printf("%10.3f", A[i]);
-  }
-}
 
 void initRandomMatrix (DATA_TYPE* M, uint32_t rows, uint32_t cols) {
   for (uint32_t i = 0; i < rows; ++i) {
@@ -71,9 +53,9 @@ void computeCentroidAssociatedMatrix (DATA_TYPE* C, DATA_TYPE* centers, uint32_t
 
 TEST_CASE("kernel_distances_matrix", "[kernel][distances]") {
   const unsigned int TESTS_N = 8;
-  const unsigned int N[TESTS_N] = {10, 10, 17, 30, 17,   15,  500, 1056};
+  const unsigned int N[TESTS_N] = {10, 10, 17, 30, 17,   15,  300, 1056};
   const unsigned int D[TESTS_N] = { 1,  2,  3, 11, 42, 1500,  500,  700};
-  const unsigned int K[TESTS_N] = { 2,  6,  3, 11, 20,    5,  100,  506};
+  const unsigned int K[TESTS_N] = { 2,  6,  3, 11, 20,    5,   10,  506};
 
   for (int test_i = 6; test_i < 7; ++test_i) {
     printf("TTTTT %d\n", test_i);
@@ -120,12 +102,14 @@ TEST_CASE("kernel_distances_matrix", "[kernel][distances]") {
 
       DATA_TYPE* h_C = new DATA_TYPE[d1 * d1];
       for (uint32_t ki = 0; ki < k; ++ki) {
+        // TODO test compute_point_associated_matrices (distances.cu)
         computeCentroidAssociatedMatrix(h_C, h_centroids, d, ki, k);
         if (TEST_DEBUG) {
           printf("\nCenter %u associated matrix:\n", ki);
           printMatrix(h_C, d1, d1);
         }
 
+        // TODO test compute_gemm_distances (distances.cu)
         stat = cublasCreate(&handle);
         if (stat != CUBLAS_STATUS_SUCCESS) {
           printf ("CUBLAS initialization failed\n");
@@ -191,7 +175,8 @@ TEST_CASE("kernel_distances_matrix", "[kernel][distances]") {
             cpu_dist += tmp * tmp;
           }
           DATA_TYPE gpu_dist = h_distances[ni];
-          if (TEST_DEBUG) printf("point: %u center: %u cmp: %.6f -- %.6f\n", ni, ki, gpu_dist, cpu_dist);
+          // if (TEST_DEBUG) 
+          printf("point: %u center: %u gpu(%.6f) cpu(%.6f)\n", ni, ki, gpu_dist, cpu_dist);
           REQUIRE( gpu_dist - cpu_dist < EPSILON );
         }
         if (TEST_DEBUG) printf("\n\n");

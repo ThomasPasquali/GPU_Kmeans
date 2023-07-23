@@ -1,8 +1,21 @@
 #include <iostream>
+#include <cuda_runtime.h>
+#include <cublas_v2.h>
 
 #include "utils.cuh"
+#include "include/common.h"
+
+#define IDX2C(i,j,ld) (((j)*(ld))+(i))
 
 using namespace std;
+
+void checkCUBLAS(cublasStatus_t err, const char* const func, const char* const file, const int line) {
+  if (err != CUBLAS_STATUS_SUCCESS) {
+    cerr << "CUBLAS Runtime Error at: " << file << ":" << line << endl;
+    // cerr << cudaGetErrorString(err) << " " << func << endl;
+    exit(EXIT_FAILURE);
+  }
+}
 
 void check(cudaError err, const char* const func, const char* const file, const int line) {
   if (err != cudaSuccess) {
@@ -89,4 +102,28 @@ unsigned int next_pow_2(unsigned int x) {
   x |= x >> 8;
   x |= x >> 16;
   return ++x;
+}
+
+void printMatrixColMaj (DATA_TYPE* M, uint32_t rows, uint32_t cols) {
+  for (uint32_t i = 0; i < rows; ++i) {
+    for (uint32_t j = 0; j < cols; ++j) {
+      printf("%10.3f", M[IDX2C(i, j, rows)]);
+    }
+    printf("\n");
+  }
+}
+
+void printMatrixRowMaj (DATA_TYPE* M, uint32_t rows, uint32_t cols) {
+  for (uint32_t i = 0; i < rows; ++i) {
+    for (uint32_t j = 0; j < cols; ++j) {
+      printf("%10.3f", M[i * cols + j]);
+    }
+    printf("\n");
+  }
+}
+
+void printArray (DATA_TYPE* A, uint32_t len) {
+  for (uint32_t i = 0; i < len; ++i) {
+    printf("%10.3f", A[i]);
+  }
 }
