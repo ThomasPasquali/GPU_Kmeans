@@ -11,7 +11,7 @@
  * 2: compute_distances_one_point_per_warp
  * 3: matrix multiplication
  */
-#define COMPUTE_DISTANCES_KERNEL 2
+#define COMPUTE_DISTANCES_KERNEL 3
 
 /**
  * @brief 

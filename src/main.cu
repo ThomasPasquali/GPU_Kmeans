@@ -85,7 +85,7 @@ int main(int argc, char **argv) {
     input = new InputParser<DATA_TYPE>(cin, d, n);
   }
   
-  if (DEBUG_INPUT_DATA) cout << *input << endl;
+  if (DEBUG_INPUT_DATA) cout << "Points" << endl << *input << endl;
 
   // Check devices
   int deviceCount = 0;

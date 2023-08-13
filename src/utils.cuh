@@ -6,6 +6,8 @@
 
 using namespace std;
 
+#define IDX2C(i,j,ld) (((j)*(ld))+(i))
+
 #define CHECK_CUBLAS_ERROR(val)   checkCUBLAS((val), #val, __FILE__, __LINE__)
 #define CHECK_CUDA_ERROR(val)   check((val), #val, __FILE__, __LINE__)
 #define CHECK_LAST_CUDA_ERROR() checkLast(__FILE__, __LINE__)
@@ -17,6 +19,8 @@ void checkLast(const char* const file, const int line);
 void describeDevice (int dev, cudaDeviceProp& deviceProp);
 unsigned int next_pow_2(unsigned int x);
 
+void printMatrixColMajLimited (DATA_TYPE* M, uint32_t rows, uint32_t cols, uint32_t max_cols, uint32_t max_rows);
+void printMatrixRowMajLimited (DATA_TYPE* M, uint32_t rows, uint32_t cols, uint32_t max_cols, uint32_t max_rows);
 void printMatrixColMaj (DATA_TYPE* M, uint32_t rows, uint32_t cols);
 void printMatrixRowMaj (DATA_TYPE* M, uint32_t rows, uint32_t cols);
 void printArray (DATA_TYPE* A, uint32_t len);

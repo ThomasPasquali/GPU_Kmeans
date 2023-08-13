@@ -5,8 +5,6 @@
 #include "utils.cuh"
 #include "include/common.h"
 
-#define IDX2C(i,j,ld) (((j)*(ld))+(i))
-
 using namespace std;
 
 void checkCUBLAS(cublasStatus_t err, const char* const func, const char* const file, const int line) {
@@ -107,7 +105,7 @@ unsigned int next_pow_2(unsigned int x) {
 void printMatrixColMaj (DATA_TYPE* M, uint32_t rows, uint32_t cols) {
   for (uint32_t i = 0; i < rows; ++i) {
     for (uint32_t j = 0; j < cols; ++j) {
-      printf("%10.3f", M[IDX2C(i, j, rows)]);
+      printf("%10.3f ", M[IDX2C(i, j, rows)]);
     }
     printf("\n");
   }
@@ -116,7 +114,29 @@ void printMatrixColMaj (DATA_TYPE* M, uint32_t rows, uint32_t cols) {
 void printMatrixRowMaj (DATA_TYPE* M, uint32_t rows, uint32_t cols) {
   for (uint32_t i = 0; i < rows; ++i) {
     for (uint32_t j = 0; j < cols; ++j) {
-      printf("%10.3f", M[i * cols + j]);
+      printf("%10.3f ", M[i * cols + j]);
+    }
+    printf("\n");
+  }
+}
+
+void printMatrixColMajLimited (DATA_TYPE* M, uint32_t rows, uint32_t cols, uint32_t max_cols, uint32_t max_rows) {
+  const uint32_t c = min(cols, max_cols);
+  const uint32_t r = min(cols, max_rows);
+  for (uint32_t i = 0; i < r; ++i) {
+    for (uint32_t j = 0; j < c; ++j) {
+      printf("%10.3f ", M[IDX2C(i, j, rows)]);
+    }
+    printf("\n");
+  }
+}
+
+void printMatrixRowMajLimited (DATA_TYPE* M, uint32_t rows, uint32_t cols, uint32_t max_cols, uint32_t max_rows) {
+  const uint32_t c = min(cols, max_cols);
+  const uint32_t r = min(cols, max_rows);
+  for (uint32_t i = 0; i < r; ++i) {
+    for (uint32_t j = 0; j < c; ++j) {
+      printf("%10.3f ", M[i * cols + j]);
     }
     printf("\n");
   }
@@ -124,6 +144,6 @@ void printMatrixRowMaj (DATA_TYPE* M, uint32_t rows, uint32_t cols) {
 
 void printArray (DATA_TYPE* A, uint32_t len) {
   for (uint32_t i = 0; i < len; ++i) {
-    printf("%10.3f", A[i]);
+    printf("%10.3f ", A[i]);
   }
 }
