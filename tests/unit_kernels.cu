@@ -9,7 +9,6 @@
 #include "../src/utils.cuh"
 #include "../src/include/common.h"
 
-#define KERNEL_CENTROIDS 0
 #define TEST_DEBUG 0
 
 const DATA_TYPE infty   = numeric_limits<DATA_TYPE>::infinity();
@@ -81,14 +80,14 @@ TEST_CASE("kernel_distances_matrix", "[kernel][distances]") {
       }
       if (TEST_DEBUG) {
         printf("\nPOINTS:\n");
-        printMatrix(h_points, n, d1);
+        printMatrixColMaj(h_points, n, d1);
       }
 
       // Constructing C
       initRandomMatrix(h_centroids, k, d);
       if (TEST_DEBUG) {
         printf("\nCENTERS:\n");
-        printMatrix(h_centroids, k, d);
+        printMatrixColMaj(h_centroids, k, d);
       }
 
       cublasStatus_t stat;
@@ -106,7 +105,7 @@ TEST_CASE("kernel_distances_matrix", "[kernel][distances]") {
         computeCentroidAssociatedMatrix(h_C, h_centroids, d, ki, k);
         if (TEST_DEBUG) {
           printf("\nCenter %u associated matrix:\n", ki);
-          printMatrix(h_C, d1, d1);
+          printMatrixColMaj(h_C, d1, d1);
         }
 
         // TODO test compute_gemm_distances (distances.cu)
@@ -143,7 +142,7 @@ TEST_CASE("kernel_distances_matrix", "[kernel][distances]") {
         }
         if (TEST_DEBUG) {
           printf("\nRES:\n");
-          printMatrix(h_res, n, d1);
+          printMatrixColMaj(h_res, n, d1);
         }
 
         stat = cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_T, 
@@ -159,7 +158,7 @@ TEST_CASE("kernel_distances_matrix", "[kernel][distances]") {
         }
         if (TEST_DEBUG) {
           printf("\nRES:\n");
-          printMatrix(h_res, n, n);
+          printMatrixColMaj(h_res, n, n);
         }
 
         for (size_t j = 0; j < n; ++j) {
@@ -338,7 +337,7 @@ TEST_CASE("kernel_centroids", "[kernel][centroids]") {
   const unsigned int N[TESTS_N] = {2, 10, 100,  51, 159, 1000, 3456, 10056};
   const unsigned int K[TESTS_N] = {1,  4,   7,  10, 129,  997, 1023, 1024};
   
-  for (int d_idx = 0; d_idx < 4; ++d_idx) {
+  for (int d_idx = 0; d_idx < TESTS_N; ++d_idx) {
     for (int n_idx = 0; n_idx < TESTS_N; ++n_idx) {
       for (int k_idx = 0; k_idx < TESTS_N; ++k_idx) {
         const unsigned int d = D[d_idx];
@@ -379,8 +378,10 @@ TEST_CASE("kernel_centroids", "[kernel][centroids]") {
           }  
           
           dim3 cent_grid_dim(k);
-          dim3 cent_block_dim((((int) n) > 32) ? next_pow_2((n + 1) / 2) : 32, d); 
+          dim3 cent_block_dim((((int) n) > 32) ? next_pow_2((n + 1) / 2) : 32, 
+                              (((int) d) > 32) ? 32 : d); 
           int cent_threads_tot = cent_block_dim.x * cent_block_dim.y;
+          int rounds = ((d - 1) / 32) + 1;
           while (cent_threads_tot > 1024) {
             cent_block_dim.x /= 2;
             cent_grid_dim.y *= 2;
@@ -399,13 +400,10 @@ TEST_CASE("kernel_centroids", "[kernel][centroids]") {
           CHECK_CUDA_ERROR(cudaMalloc(&d_clusters_len, k * sizeof(uint32_t)));
           CHECK_CUDA_ERROR(cudaMemcpy(d_clusters_len, h_clusters_len, k * sizeof(uint32_t), cudaMemcpyHostToDevice));
           
-          #if KERNEL_CENTROIDS == 0
-            compute_centroids_shfl<<<cent_grid_dim, cent_block_dim>>>(d_centroids, d_points, d_points_clusters, d_clusters_len, n, d);
-          #else
-            size_t cent_sh_mem = (cent_block_dim.x / 32) * k * d * sizeof(DATA_TYPE);
-            compute_centroids_shfl_shrd<<<cent_grid_dim, cent_block_dim, cent_sh_mem>>>(d_centroids, d_points, d_points_clusters, d_clusters_len, n, d);
-          #endif
-          cudaDeviceSynchronize();
+          for (int i = 0; i < rounds; i++) {
+            compute_centroids_shfl<<<cent_grid_dim, cent_block_dim>>>(d_centroids, d_points, d_points_clusters, d_clusters_len, n, d, k, i); 
+          }
+          CHECK_CUDA_ERROR(cudaDeviceSynchronize());
 
           DATA_TYPE *h_centroids_cpy = new DATA_TYPE[k * d];
           CHECK_CUDA_ERROR(cudaMemcpy(h_centroids_cpy, d_centroids, k * d * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost));

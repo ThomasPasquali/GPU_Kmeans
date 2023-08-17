@@ -157,17 +157,15 @@ uint64_t Kmeans::run (uint64_t maxiter) {
   #endif
   
   dim3 cent_grid_dim(k);
-  dim3 cent_block_dim((((int) n) > deviceProps->warpSize) ? next_pow_2((n + 1) / 2) : deviceProps->warpSize, d); 
+  dim3 cent_block_dim((((int) n) > deviceProps->warpSize) ? next_pow_2((n + 1) / 2) : deviceProps->warpSize, 
+                      (((int) d) > deviceProps->warpSize) ? deviceProps->warpSize : d); 
   int cent_threads_tot = cent_block_dim.x * cent_block_dim.y;
+  int rounds = ((d - 1) / deviceProps->warpSize) + 1;
   while (cent_threads_tot > deviceProps->maxThreadsPerBlock) {
     cent_block_dim.x /= 2;
     cent_grid_dim.y *= 2;
     cent_threads_tot = cent_block_dim.x * cent_block_dim.y;
-  }  
-  size_t cent_sh_mem = 0;
-  #if COMPUTE_CENTROIDS_KERNEL == 1
-    cent_sh_mem = (cent_block_dim.x / deviceProps->warpSize) * k * d * sizeof(DATA_TYPE);
-  #endif
+  } 
 
   /* MAIN LOOP */
   while (iter++ < maxiter) {
@@ -313,14 +311,12 @@ uint64_t Kmeans::run (uint64_t maxiter) {
       cudaEventRecord(e_perf_cent_start);
     #endif
 
-    if (DEBUG_KERNELS_INVOKATION) printf(YELLOW "[KERNEL]" RESET " %-25s: Grid (%4u, %4u, %4u), Block (%4u, %4u, %4u), Sh.mem. %luB\n", "compute_centroids", cent_grid_dim.x, cent_grid_dim.y, cent_grid_dim.z, cent_block_dim.x, cent_block_dim.y, cent_block_dim.z, cent_sh_mem);
+    if (DEBUG_KERNELS_INVOKATION) printf(YELLOW "[KERNEL]" RESET " %-25s: Grid (%4u, %4u, %4u), Block (%4u, %4u, %4u)\n", "compute_centroids", cent_grid_dim.x, cent_grid_dim.y, cent_grid_dim.z, cent_block_dim.x, cent_block_dim.y, cent_block_dim.z);
     
-    #if COMPUTE_CENTROIDS_KERNEL == 1
-      compute_centroids_shfl_shrd<<<cent_grid_dim, cent_block_dim, cent_sh_mem>>>(d_centroids, d_points, d_points_clusters, d_clusters_len, n, d);
-    #else 
-      compute_centroids_shfl<<<cent_grid_dim, cent_block_dim>>>(d_centroids, d_points, d_points_clusters, d_clusters_len, n, d);
-    #endif
-    CHECK_CUDA_ERROR(cudaDeviceSynchronize());    
+    for (int i = 0; i < rounds; i++) {
+      compute_centroids_shfl<<<cent_grid_dim, cent_block_dim>>>(d_centroids, d_points, d_points_clusters, d_clusters_len, n, d, k, i);
+    }
+    CHECK_CUDA_ERROR(cudaDeviceSynchronize()); 
 
     #if PERFORMANCES_KERNEL_CENTROIDS
       cudaEventRecord(e_perf_cent_stop);
