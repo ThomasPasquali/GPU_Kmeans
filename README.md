@@ -99,5 +99,3 @@ Parameters (in order):
 ```
 
 Compiles (if needed) and runs `GPU_Kmeans`, `GPU_python` on a given dataset end then shows a comparison of the results.
-
-<!-- norma(x-y)<= norma(x) dice che x==y) -->

@@ -12,6 +12,7 @@
 #include "utils.cuh"
 #include "kmeans.cuh"
 
+#define DEVICE          0
 #define ARG_DIMENSIONS  0
 #define ARG_SAMPLES     1
 #define ARG_CLUSTERS    2
@@ -102,11 +103,9 @@ int main(int argc, char **argv) {
     printf("Detected %d CUDA Capable device(s)\n", deviceCount);
   }
 
-  int dev = 0;
-  cudaSetDevice(dev); // Use device 0 by default
   cudaDeviceProp deviceProp;
-  cudaGetDeviceProperties(&deviceProp, dev);
-  if (DEBUG_DEVICE) describeDevice(dev, deviceProp);
+  getDeviceProps(DEVICE, &deviceProp);
+  if (DEBUG_DEVICE) describeDevice(DEVICE, deviceProp);
   
   Kmeans kmeans(n, d, k, input->get_dataset(), &deviceProp);
   uint64_t converged = kmeans.run(maxiter);

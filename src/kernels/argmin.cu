@@ -1,4 +1,6 @@
+#include <cub/cub.cuh>
 #include "kernels.cuh"
+#include "../utils.cuh"
 
 __device__ Pair shfl_xor_sync (Pair p, unsigned delta){
   return Pair{
@@ -54,4 +56,45 @@ __global__ void clusters_argmin_shfl(const uint32_t n, const uint32_t k, DATA_TY
     points_clusters[blockIdx.x] = minI;
     atomicAdd(&clusters_len[minI], 1);
   }
+}
+
+void clusters_argmin_cub(const DATA_TYPE* d_distances, const uint32_t n, const uint32_t k, uint32_t* h_points_clusters, uint32_t* d_points_clusters, uint64_t* h_clusters_len) {
+  memset(h_clusters_len, 0, k * sizeof(uint64_t));
+  for (size_t i = 0; i < n; i++) {
+    cub::KeyValuePair<int32_t, DATA_TYPE> *d_argmin = NULL;
+    CHECK_CUDA_ERROR(cudaMalloc(&d_argmin, sizeof(int32_t) + sizeof(DATA_TYPE)));
+    // Allocate temporary storage
+    void *d_temp_storage = NULL; size_t temp_storage_bytes = 0;
+    cub::DeviceReduce::ArgMin(d_temp_storage, temp_storage_bytes, d_distances, d_argmin, k);
+    CHECK_CUDA_ERROR(cudaMalloc(&d_temp_storage, temp_storage_bytes));
+    
+    // Run argmin-reduction
+    cub::DeviceReduce::ArgMin(d_temp_storage, temp_storage_bytes, d_distances + i * k, d_argmin, k);
+
+    int32_t argmin_idx;
+    DATA_TYPE argmin_val;
+    CHECK_CUDA_ERROR(cudaMemcpy(&argmin_idx, &(d_argmin->key), sizeof(int32_t), cudaMemcpyDeviceToHost));
+    CHECK_CUDA_ERROR(cudaMemcpy(&argmin_val, &(d_argmin->value), sizeof(DATA_TYPE), cudaMemcpyDeviceToHost));
+    CHECK_CUDA_ERROR(cudaFree(d_temp_storage));
+    CHECK_CUDA_ERROR(cudaFree(d_argmin));
+    CHECK_CUDA_ERROR(cudaDeviceSynchronize());
+
+    #if DEBUG_KERNEL_ARGMIN
+      printf(GREEN "Argmin point %lu: %d %.3f" RESET "\n", i, argmin_idx, argmin_val);
+    #endif
+
+    ++h_clusters_len[argmin_idx];
+    h_points_clusters[i] = argmin_idx;
+  }
+  CHECK_CUDA_ERROR(cudaMemcpy(d_points_clusters, h_points_clusters, n * sizeof(uint32_t), cudaMemcpyHostToDevice));
+}
+
+void schedule_argmin_kernel(const cudaDeviceProp *props, const uint32_t n, const uint32_t k, dim3 *grid, dim3 *block, uint32_t *warps_per_block, uint32_t *sh_mem) {
+  dim3 argmin_grid_dim(n);
+  dim3 argmin_block_dim(max(next_pow_2(k), props->warpSize));
+  
+  *grid   = argmin_grid_dim;
+  *block  = argmin_block_dim;
+  *warps_per_block = (k + props->warpSize - 1) / props->warpSize; // Ceil
+  *sh_mem = (*warps_per_block) * sizeof(Pair);
 }

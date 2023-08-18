@@ -16,7 +16,8 @@ void checkCUBLAS(cublasStatus_t err, const char* const func, const char* const f
 void check(cudaError err, const char* const func, const char* const file, const int line);
 void checkLast(const char* const file, const int line);
 
-void describeDevice (int dev, cudaDeviceProp& deviceProp);
+void getDeviceProps(int dev, cudaDeviceProp *deviceProp);
+void describeDevice(int dev, cudaDeviceProp& deviceProp);
 unsigned int next_pow_2(unsigned int x);
 
 void printMatrixColMajLimited (DATA_TYPE* M, uint32_t rows, uint32_t cols, uint32_t max_cols, uint32_t max_rows);

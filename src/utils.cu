@@ -32,6 +32,11 @@ void checkLast(const char* const file, const int line) {
   }
 }
 
+void getDeviceProps(int dev, cudaDeviceProp *deviceProp) {
+  cudaSetDevice(dev);
+  cudaGetDeviceProperties(deviceProp, dev);
+}
+
 void describeDevice (int dev, cudaDeviceProp& deviceProp) {
   printf("\nDevice %d: \"%s\"\n", dev, deviceProp.name);
 

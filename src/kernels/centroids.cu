@@ -1,4 +1,5 @@
 #include "kernels.cuh"
+#include "../utils.cuh"
 
 __global__ void compute_centroids_shfl(DATA_TYPE* centroids, const DATA_TYPE* points, const uint32_t* points_clusters, const uint32_t* clusters_len, const uint64_t n, const uint32_t d, const uint32_t k, const uint32_t round) { 
   const uint32_t block_base = warpSize * round;  // Get in which block of d the kernel works (0 <= d < 32 => block_base = 0; 32 <= d < 64 => block_base = 32; ...)
@@ -84,4 +85,19 @@ __global__ void compute_centroids_shfl_shrd(DATA_TYPE* centroids, const DATA_TYP
       atomicAdd(&centroids[centroids_idx], val);
     }
   }
+}
+
+void schedule_centroids_kernel(const cudaDeviceProp *props, const uint32_t n, const uint32_t d, const uint32_t k, dim3 *grid, dim3 *block) {
+  dim3 cent_grid_dim(k);
+  dim3 cent_block_dim(max(next_pow_2((n + 1) / 2), props->warpSize), min(props->warpSize, d)); 
+  int cent_threads_tot = cent_block_dim.x * cent_block_dim.y;
+  
+  while (cent_threads_tot > props->maxThreadsPerBlock) {
+    cent_block_dim.x /= 2;
+    cent_grid_dim.y *= 2;
+    cent_threads_tot = cent_block_dim.x * cent_block_dim.y;
+  } 
+
+  *grid  = cent_grid_dim;
+  *block = cent_block_dim;
 }
