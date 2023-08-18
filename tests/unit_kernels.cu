@@ -15,6 +15,8 @@
 const DATA_TYPE infty   = numeric_limits<DATA_TYPE>::infinity();
 const DATA_TYPE EPSILON = numeric_limits<DATA_TYPE>::epsilon();
 
+cudaDeviceProp deviceProps;
+
 void initRandomMatrix (DATA_TYPE* M, uint32_t rows, uint32_t cols) {
   for (uint32_t i = 0; i < rows; ++i) {
     for (uint32_t j = 0; j < cols; ++j) {
@@ -278,58 +280,67 @@ TEST_CASE("kernel_argmin", "[kernel][argmin]") {
   const unsigned int N[TESTS_N] = {2, 10, 17, 51, 159, 1000, 3456, 10056};
   const unsigned int K[TESTS_N] = {1,  2,  7,  5, 129,  997, 1023, 1024};
 
-  for (int i = 0; i < TESTS_N; ++i) {
-    const unsigned int n = N[i];
-    const unsigned int k = K[i];
-    const unsigned int SIZE = n * k;
+  getDeviceProps(0, &deviceProps);
 
-    char test_name[50];
-    sprintf(test_name, "kernel clusters_argmin_shfl n: %u  k: %u", n, k);
-    SECTION(test_name) {
-        
-      DATA_TYPE *h_distances = new DATA_TYPE[SIZE];
-      for (uint32_t i = 0; i < n; ++i) {
-        for (uint32_t j = 0; j < k; ++j) {
-          h_distances[i * k + j] = static_cast <DATA_TYPE> (std::rand() / 105.456);
-          if (TEST_DEBUG) { printf("%-2u %-2u -> %.0f\n", i, j, h_distances[i * k + j]); }
-        }
-      }
-      DATA_TYPE *d_distances;
-      cudaMalloc(&d_distances, sizeof(DATA_TYPE) * SIZE);
-      cudaMemcpy(d_distances, h_distances, sizeof(DATA_TYPE) * SIZE,  cudaMemcpyHostToDevice);
+  for (int n_idx = 0; n_idx < TESTS_N; ++n_idx) {
+    for (int k_idx = 0; k_idx < TESTS_N; ++k_idx) {
+      const unsigned int n = N[n_idx];
+      const unsigned int k = K[k_idx];
+      const unsigned int SIZE = n * k;
 
-      uint32_t* d_clusters_len;
-      cudaMalloc(&d_clusters_len, k * sizeof(uint32_t));
-      cudaMemset(d_clusters_len, 0, k * sizeof(uint32_t));
-
-      uint32_t* d_points_clusters;
-      cudaMalloc(&d_points_clusters, sizeof(uint32_t) * n);
-      
-      uint32_t warps_per_block = (k + WARP_SIZE - 1) / WARP_SIZE; // Ceil
-      uint32_t sh_mem = warps_per_block * sizeof(Pair);
-      clusters_argmin_shfl<<<n, max(next_pow_2(k), WARP_SIZE), sh_mem>>>(n, k, d_distances, d_points_clusters, d_clusters_len, warps_per_block, infty);
-      cudaDeviceSynchronize();
-
-      uint32_t h_points_clusters[n];
-      cudaMemcpy(h_points_clusters, d_points_clusters, sizeof(uint32_t) * n,  cudaMemcpyDeviceToHost);
-      cudaDeviceSynchronize();
-      for (uint32_t i = 0; i < n; i++) {
-        DATA_TYPE min = infty;
-        uint32_t idx = 0;
-        for (uint32_t j = 0, ii = i * k; j < k; j++, ii++) {
-          if (TEST_DEBUG) { printf("j: %u, ii: %u, v: %.0f\n", j, ii, h_distances[ii]); }
-          if (h_distances[ii] < min) {
-            min = h_distances[ii];
-            idx = j;
+      char test_name[50];
+      sprintf(test_name, "kernel clusters_argmin_shfl n: %u  k: %u", n, k);
+      SECTION(test_name) {
+          
+        DATA_TYPE *h_distances = new DATA_TYPE[SIZE];
+        for (uint32_t i = 0; i < n; ++i) {
+          for (uint32_t j = 0; j < k; ++j) {
+            h_distances[i * k + j] = static_cast <DATA_TYPE> (std::rand() / 105.456);
+            if (TEST_DEBUG) { printf("%-2u %-2u -> %.0f\n", i, j, h_distances[i * k + j]); }
           }
         }
+
+        DATA_TYPE *d_distances;
+        cudaMalloc(&d_distances, sizeof(DATA_TYPE) * SIZE);
+        cudaMemcpy(d_distances, h_distances, sizeof(DATA_TYPE) * SIZE,  cudaMemcpyHostToDevice);
+
+        uint32_t* d_clusters_len;
+        cudaMalloc(&d_clusters_len, k * sizeof(uint32_t));
+        cudaMemset(d_clusters_len, 0, k * sizeof(uint32_t));
+
+        uint32_t* d_points_clusters;
+        cudaMalloc(&d_points_clusters, sizeof(uint32_t) * n);
         
-        REQUIRE( h_points_clusters[i] == idx );
-        if (TEST_DEBUG) { printf("%-7u -> %5u (should be %-5u %.3f)\n", i, h_points_clusters[i], idx, min); }
+        dim3 grid_dim, block_dim;
+        uint32_t sh_mem, warps_per_block;
+        schedule_argmin_kernel(&deviceProps, n, k, &grid_dim, &block_dim, &warps_per_block, &sh_mem);
+        clusters_argmin_shfl<<<grid_dim, block_dim, sh_mem>>>(n, k, d_distances, d_points_clusters, d_clusters_len, warps_per_block, infty);
+        cudaDeviceSynchronize();
+
+        uint32_t *h_points_clusters = new uint32_t[n];
+        cudaMemcpy(h_points_clusters, d_points_clusters, sizeof(uint32_t) * n,  cudaMemcpyDeviceToHost);
+        
+        for (uint32_t i = 0; i < n; i++) {
+          DATA_TYPE min = infty;
+          uint32_t idx = 0;
+          for (uint32_t j = 0, ii = i * k; j < k; j++, ii++) {
+            if (TEST_DEBUG) { printf("j: %u, ii: %u, v: %.0f\n", j, ii, h_distances[ii]); }
+            if (h_distances[ii] < min) {
+              min = h_distances[ii];
+              idx = j;
+            }
+          }
+          
+          REQUIRE( h_points_clusters[i] == idx );
+          if (TEST_DEBUG) { printf("%-7u -> %5u (should be %-5u %.3f)\n", i, h_points_clusters[i], idx, min); }
+        }
+
+        delete[] h_distances;
+        delete[] h_points_clusters;
+        cudaFree(d_distances);
+        cudaFree(d_clusters_len);
+        cudaFree(d_points_clusters);
       }
-      cudaFree(d_distances);
-      cudaFree(d_clusters_len);
-      cudaFree(d_points_clusters);
     }
   }
 }
@@ -339,6 +350,8 @@ TEST_CASE("kernel_centroids", "[kernel][centroids]") {
   const unsigned int D[TESTS_N] = {2,  3,  10,  32,  50,  100, 1000, 1024};
   const unsigned int N[TESTS_N] = {2, 10, 100,  51, 159, 1000, 3456, 10056};
   const unsigned int K[TESTS_N] = {1,  4,   7,  10, 129,  997, 1023, 1024};
+
+  getDeviceProps(0, &deviceProps);
   
   for (int d_idx = 0; d_idx < TESTS_N; ++d_idx) {
     for (int n_idx = 0; n_idx < TESTS_N; ++n_idx) {
@@ -379,17 +392,10 @@ TEST_CASE("kernel_centroids", "[kernel][centroids]") {
               h_centroids[i * d + j] *= scale; 
             }
           }  
-          
-          dim3 cent_grid_dim(k);
-          dim3 cent_block_dim((((int) n) > WARP_SIZE) ? next_pow_2((n + 1) / 2) : WARP_SIZE, 
-                              (((int) d) > WARP_SIZE) ? WARP_SIZE : d); 
-          int cent_threads_tot = cent_block_dim.x * cent_block_dim.y;
+
           int rounds = ((d - 1) / WARP_SIZE) + 1;
-          while (cent_threads_tot > 1024) {
-            cent_block_dim.x /= 2;
-            cent_grid_dim.y *= 2;
-            cent_threads_tot = cent_block_dim.x * cent_block_dim.y;
-          }
+          dim3 grid_dim, block_dim;
+          schedule_centroids_kernel(&deviceProps, n, d, k, &grid_dim, &block_dim);
 
           DATA_TYPE* d_centroids;
           CHECK_CUDA_ERROR(cudaMalloc(&d_centroids, k * d * sizeof(DATA_TYPE)));
@@ -404,7 +410,7 @@ TEST_CASE("kernel_centroids", "[kernel][centroids]") {
           CHECK_CUDA_ERROR(cudaMemcpy(d_clusters_len, h_clusters_len, k * sizeof(uint32_t), cudaMemcpyHostToDevice));
           
           for (int i = 0; i < rounds; i++) {
-            compute_centroids_shfl<<<cent_grid_dim, cent_block_dim>>>(d_centroids, d_points, d_points_clusters, d_clusters_len, n, d, k, i); 
+            compute_centroids_shfl<<<grid_dim, block_dim>>>(d_centroids, d_points, d_points_clusters, d_clusters_len, n, d, k, i); 
           }
           CHECK_CUDA_ERROR(cudaDeviceSynchronize());
 
