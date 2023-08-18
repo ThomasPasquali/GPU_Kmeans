@@ -68,10 +68,14 @@ __global__ void compute_distances_shfl(DATA_TYPE* distances, DATA_TYPE* centroid
 /**
  * NOTICE: the reduction limits the maximum block size to 32 (warpSize) 
 */
-__global__ void compute_point_associated_matrices (const DATA_TYPE* points, DATA_TYPE* associated_matrices, const uint32_t d) {
+__global__ void compute_point_associated_matrices (const DATA_TYPE* points, DATA_TYPE* associated_matrices, const uint32_t d, const uint32_t round) {
+  const uint32_t block_base = warpSize * round;
   const uint32_t p_i = blockIdx.x;
-  const uint32_t d_i = threadIdx.x;
+  const uint32_t d_i = block_base + threadIdx.x;
   const uint32_t d_i1 = d_i + 1;
+
+  // If dim in the thread is greater than d, then return to avoid illegal writes
+  if (d_i >= d) { return; } 
 
   DATA_TYPE c = points[p_i * d + d_i];
   DATA_TYPE c_11 = c * c;
@@ -82,8 +86,8 @@ __global__ void compute_point_associated_matrices (const DATA_TYPE* points, DATA
 
   const uint32_t d1 = d + 1;
   const uint32_t matrix_base_i = p_i * d1 * d1;
-  if (d_i == 0) {
-    associated_matrices[matrix_base_i] = c_11; // Write reduced c_11
+  if (threadIdx.x == 0) {
+    atomicAdd(&associated_matrices[matrix_base_i], c_11); // Write reduced c_11
   }
   associated_matrices[matrix_base_i + d_i1] = -c;               // Write first column
   associated_matrices[matrix_base_i + (d_i1 * d1)] = -c;        // Write first row

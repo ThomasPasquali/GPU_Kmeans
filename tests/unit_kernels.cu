@@ -10,6 +10,7 @@
 #include "../src/include/common.h"
 
 #define TEST_DEBUG 0
+#define WARP_SIZE  32
 
 const DATA_TYPE infty   = numeric_limits<DATA_TYPE>::infinity();
 const DATA_TYPE EPSILON = numeric_limits<DATA_TYPE>::epsilon();
@@ -238,7 +239,7 @@ TEST_CASE("kernel_distances_warp", "[kernel][distances]") {
       cudaMalloc(&d_centroids, sizeof(DATA_TYPE) * k * d);
       cudaMemcpy(d_centroids, h_centroids, sizeof(DATA_TYPE) * k * d, cudaMemcpyHostToDevice);
 
-      const uint32_t dist_max_points_per_warp = 32 / next_pow_2(d);
+      const uint32_t dist_max_points_per_warp = WARP_SIZE / next_pow_2(d);
       dim3 dist_grid_dim(ceil(((float) n) / dist_max_points_per_warp), k);
       dim3 dist_block_dim(dist_max_points_per_warp * next_pow_2(d));
 
@@ -264,6 +265,7 @@ TEST_CASE("kernel_distances_warp", "[kernel][distances]") {
         REQUIRE( h_distances[i] - cpu_distances[i] < EPSILON );
       }
 
+      delete[] cpu_distances;
       cudaFree(d_distances);
       cudaFree(d_points);
       cudaFree(d_centroids);
@@ -289,7 +291,7 @@ TEST_CASE("kernel_argmin", "[kernel][argmin]") {
       for (uint32_t i = 0; i < n; ++i) {
         for (uint32_t j = 0; j < k; ++j) {
           h_distances[i * k + j] = static_cast <DATA_TYPE> (std::rand() / 105.456);
-          // printf("%-2u %-2u -> %.0f\n", i, j, h_distances[i * k + j]);
+          if (TEST_DEBUG) { printf("%-2u %-2u -> %.0f\n", i, j, h_distances[i * k + j]); }
         }
       }
       DATA_TYPE *d_distances;
@@ -303,8 +305,9 @@ TEST_CASE("kernel_argmin", "[kernel][argmin]") {
       uint32_t* d_points_clusters;
       cudaMalloc(&d_points_clusters, sizeof(uint32_t) * n);
       
-      uint32_t warps_per_block = (k + 32 - 1) / 32; // Ceil
-      clusters_argmin_shfl<<<n, max(next_pow_2(k), 32)>>>(n, k, d_distances, d_points_clusters, d_clusters_len, warps_per_block, infty);
+      uint32_t warps_per_block = (k + WARP_SIZE - 1) / WARP_SIZE; // Ceil
+      uint32_t sh_mem = warps_per_block * sizeof(Pair);
+      clusters_argmin_shfl<<<n, max(next_pow_2(k), WARP_SIZE), sh_mem>>>(n, k, d_distances, d_points_clusters, d_clusters_len, warps_per_block, infty);
       cudaDeviceSynchronize();
 
       uint32_t h_points_clusters[n];
@@ -314,7 +317,7 @@ TEST_CASE("kernel_argmin", "[kernel][argmin]") {
         DATA_TYPE min = infty;
         uint32_t idx = 0;
         for (uint32_t j = 0, ii = i * k; j < k; j++, ii++) {
-          // printf("j: %u, ii: %u, v: %.0f\n", j, ii, h_distances[ii]);
+          if (TEST_DEBUG) { printf("j: %u, ii: %u, v: %.0f\n", j, ii, h_distances[ii]); }
           if (h_distances[ii] < min) {
             min = h_distances[ii];
             idx = j;
@@ -322,7 +325,7 @@ TEST_CASE("kernel_argmin", "[kernel][argmin]") {
         }
         
         REQUIRE( h_points_clusters[i] == idx );
-        //printf("%-7u -> %5u (should be %-5u %.3f)\n", i, h_points_clusters[i], idx, min);
+        if (TEST_DEBUG) { printf("%-7u -> %5u (should be %-5u %.3f)\n", i, h_points_clusters[i], idx, min); }
       }
       cudaFree(d_distances);
       cudaFree(d_clusters_len);
@@ -378,10 +381,10 @@ TEST_CASE("kernel_centroids", "[kernel][centroids]") {
           }  
           
           dim3 cent_grid_dim(k);
-          dim3 cent_block_dim((((int) n) > 32) ? next_pow_2((n + 1) / 2) : 32, 
-                              (((int) d) > 32) ? 32 : d); 
+          dim3 cent_block_dim((((int) n) > WARP_SIZE) ? next_pow_2((n + 1) / 2) : WARP_SIZE, 
+                              (((int) d) > WARP_SIZE) ? WARP_SIZE : d); 
           int cent_threads_tot = cent_block_dim.x * cent_block_dim.y;
-          int rounds = ((d - 1) / 32) + 1;
+          int rounds = ((d - 1) / WARP_SIZE) + 1;
           while (cent_threads_tot > 1024) {
             cent_block_dim.x /= 2;
             cent_grid_dim.y *= 2;
