@@ -26,8 +26,8 @@ const DATA_TYPE EPSILON = numeric_limits<DATA_TYPE>::epsilon();
 /* Kmeans class */
 void Kmeans::init_centroids (Point<DATA_TYPE>** points) {
   uniform_int_distribution<int> random_int(0, n - 1);
-  if (COMPUTE_DISTANCES_KERNEL > 2) {
-    CENTROIDS_BYTES += (k * sizeof(DATA_TYPE)); // FIXME be aware
+  if (COMPUTE_DISTANCES_KERNEL >= 2) {
+    CENTROIDS_BYTES += (k * sizeof(DATA_TYPE)); // Be aware
     CHECK_CUDA_ERROR(cudaHostAlloc(&h_centroids_matrix, CENTROIDS_BYTES, cudaHostAllocDefault));
   } else {
     h_centroids_matrix = NULL;
@@ -62,12 +62,12 @@ void Kmeans::init_centroids (Point<DATA_TYPE>** points) {
   for (size_t i = 0; i < k; ++i) {
     for (size_t j = 0; j < d; ++j) {
       h_centroids[i * d + j] = centroids[i]->get(j);                // Row major
-      #if COMPUTE_DISTANCES_KERNEL > 2
+      #if COMPUTE_DISTANCES_KERNEL >= 2
         h_centroids_matrix[(j + 1) * k + i] = centroids[i]->get(j); // Col major
       #endif
     }
   }
-  #if COMPUTE_DISTANCES_KERNEL > 2
+  #if COMPUTE_DISTANCES_KERNEL >= 2
     for (size_t i = 0; i < k; ++i)
       h_centroids_matrix[i] = 1; // Static prefix
   #endif
@@ -122,18 +122,13 @@ uint64_t Kmeans::run (uint64_t maxiter) {
   const uint32_t rounds = ((d - 1) / deviceProps->warpSize) + 1;
 
   #if COMPUTE_DISTANCES_KERNEL == 0
-    const uint32_t dist_max_points_per_warp = deviceProps->warpSize / d;
-    dim3 dist_grid_dim(ceil(((float) n) / dist_max_points_per_warp), k);
-    dim3 dist_block_dim(dist_max_points_per_warp * d);
-    uint32_t dist_kernel_sh_mem = k * dist_max_points_per_warp * d * sizeof(DATA_TYPE);
+    dim3 dist_grid_dim(n, k);
+    dim3 dist_block_dim(d);
+    uint32_t dist_kernel_sh_mem = 0;
   #elif COMPUTE_DISTANCES_KERNEL == 1
     const uint32_t dist_max_points_per_warp = deviceProps->warpSize / next_pow_2(d); // FIXME k > 32
     dim3 dist_grid_dim(ceil(((float) n) / dist_max_points_per_warp), k);
     dim3 dist_block_dim(dist_max_points_per_warp * next_pow_2(d));
-    uint32_t dist_kernel_sh_mem = 0;
-  #elif COMPUTE_DISTANCES_KERNEL == 2
-    dim3 dist_grid_dim(n, k);
-    dim3 dist_block_dim(d);
     uint32_t dist_kernel_sh_mem = 0;
   #else
     DATA_TYPE* d_points_assoc_matrices;
@@ -164,7 +159,7 @@ uint64_t Kmeans::run (uint64_t maxiter) {
   while (iter++ < maxiter) {
     /* COMPUTE DISTANCES */
     
-    #if COMPUTE_DISTANCES_KERNEL > 2
+    #if COMPUTE_DISTANCES_KERNEL >= 2
       if (DEBUG_KERNELS_INVOKATION) printf(YELLOW "[KERNEL]" RESET " Matmul\n");
     #else
       if (DEBUG_KERNELS_INVOKATION) printf(YELLOW "[KERNEL]" RESET " %-25s: Grid (%4u, %4u, %4u), Block (%4u, %4u, %4u), Sh.mem. %uB\n", "compute_distances", dist_grid_dim.x, dist_grid_dim.y, dist_grid_dim.z, dist_block_dim.x, dist_block_dim.y, dist_block_dim.z, dist_kernel_sh_mem);
@@ -176,11 +171,9 @@ uint64_t Kmeans::run (uint64_t maxiter) {
       cudaEventRecord(e_perf_dist_start);
     #endif
     #if COMPUTE_DISTANCES_KERNEL == 0
-      compute_distances_shmem<<<dist_grid_dim, dist_block_dim, dist_kernel_sh_mem>>>(d_distances, d_centroids, d_points, dist_max_points_per_warp, d);
+      compute_distances_one_point_per_warp<<<dist_grid_dim, dist_block_dim>>>(d_distances, d_centroids, d_points, next_pow_2(dist_block_dim.x));
     #elif COMPUTE_DISTANCES_KERNEL == 1
       compute_distances_shfl<<<dist_grid_dim, dist_block_dim>>>(d_distances, d_centroids, d_points, n, dist_max_points_per_warp, d, next_pow_2(d));
-    #elif COMPUTE_DISTANCES_KERNEL == 2
-      compute_distances_one_point_per_warp<<<dist_grid_dim, dist_block_dim>>>(d_distances, d_centroids, d_points, next_pow_2(dist_block_dim.x));
     #else
       CHECK_CUBLAS_ERROR(cublasSetMatrix(k, d1, sizeof(DATA_TYPE), h_centroids_matrix, k, d_centroids_matrix, k)); // same as CHECK_CUDA_ERROR(cudaMemcpy(d_centroids_matrix, h_centroids_matrix, CENTROIDS_BYTES, cudaMemcpyHostToDevice));
       compute_gemm_distances(cublasHandle, d1, n, k, d_points_assoc_matrices, d_centroids_matrix, d_distances);
@@ -198,7 +191,7 @@ uint64_t Kmeans::run (uint64_t maxiter) {
 
     #if DEBUG_KERNEL_DISTANCES
       printf(GREEN "[DEBUG_KERNEL_DISTANCES]\n");
-      #if COMPUTE_DISTANCES_KERNEL > 2
+      #if COMPUTE_DISTANCES_KERNEL >= 2
         cout << "Centroids matrix" << endl;
         printMatrixColMaj(h_centroids_matrix, k, d1);
         cout << endl;
@@ -345,7 +338,7 @@ uint64_t Kmeans::run (uint64_t maxiter) {
     // Copy current centroids
     memcpy(h_last_centroids, h_centroids, CENTROIDS_BYTES); 
 
-    #if COMPUTE_DISTANCES_KERNEL > 2
+    #if COMPUTE_DISTANCES_KERNEL >= 2
       /* UPDATE h_centroids_matrix */
       for (size_t i = 0; i < k; ++i) {
         h_centroids_matrix[i] = 1; // Static prefix
@@ -368,7 +361,7 @@ uint64_t Kmeans::run (uint64_t maxiter) {
   CHECK_CUDA_ERROR(cudaFree(d_distances));
   CHECK_CUDA_ERROR(cudaFree(d_points_clusters));
   CHECK_CUDA_ERROR(cudaFree(d_clusters_len));
-  #if COMPUTE_DISTANCES_KERNEL > 2
+  #if COMPUTE_DISTANCES_KERNEL >= 2
     CHECK_CUDA_ERROR(cudaFree(d_points_assoc_matrices));
     CHECK_CUDA_ERROR(cudaFree(d_centroids_matrix));
     CHECK_CUBLAS_ERROR(cublasDestroy(cublasHandle));

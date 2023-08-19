@@ -23,27 +23,6 @@ __global__ void compute_distances_one_point_per_warp(DATA_TYPE* distances, DATA_
   }
 }
 
-__global__ void compute_distances_shmem(DATA_TYPE* distances, DATA_TYPE* centroids, DATA_TYPE* points, const uint32_t points_per_warp, const uint32_t d) {
-  const uint64_t point_i = (blockIdx.x * points_per_warp) + (threadIdx.x / d);
-  const uint64_t center_i = blockIdx.y;
-  const uint32_t d_i = threadIdx.x % d;
-  const uint64_t dists_i = (center_i * blockDim.y * d) + ((point_i % points_per_warp) * d) + d_i;
-
-  extern __shared__ DATA_TYPE dists[];
-
-  if (threadIdx.x < points_per_warp * d) {
-    DATA_TYPE dist = fabs(points[point_i * d + d_i] - centroids[center_i * d + d_i]);
-    dists[dists_i] = dist * dist;
-    __syncthreads();
-    if (d_i == 0) {
-      for (int i = 1; i < d; i++) {
-        dists[dists_i] += dists[dists_i + i];
-      }
-      distances[(point_i * center_i) + point_i] = dists[dists_i];
-    }
-  }
-}
-
 __global__ void compute_distances_shfl(DATA_TYPE* distances, DATA_TYPE* centroids, DATA_TYPE* points, const uint32_t points_n, const uint32_t points_per_warp, const uint32_t d, const uint32_t d_closest_2_pow) {
   const uint32_t point_i = (blockIdx.x * points_per_warp) + (threadIdx.x / d_closest_2_pow);
   const uint32_t center_i = blockIdx.y;
@@ -65,9 +44,7 @@ __global__ void compute_distances_shfl(DATA_TYPE* distances, DATA_TYPE* centroid
 /*** END Warp oriented ***/
 
 /*** Matrix multiplication ***/
-/**
- * NOTICE: the reduction limits the maximum block size to 32 (warpSize) 
-*/
+
 __global__ void compute_point_associated_matrices (const DATA_TYPE* points, DATA_TYPE* associated_matrices, const uint32_t d, const uint32_t round) {
   const uint32_t block_base = warpSize * round;
   const uint32_t p_i = blockIdx.x;

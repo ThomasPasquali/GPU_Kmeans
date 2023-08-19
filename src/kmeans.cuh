@@ -6,12 +6,11 @@
 
 /**
  * @brief 
- * 0: compute_distances_shmem
+ * 0: compute_distances_one_point_per_warp
  * 1: compute_distances_shfl
- * 2: compute_distances_one_point_per_warp
- * 3: matrix multiplication
+ * 2: matrix multiplication
  */
-#define COMPUTE_DISTANCES_KERNEL 3
+#define COMPUTE_DISTANCES_KERNEL 1
 
 /**
  * @brief 
