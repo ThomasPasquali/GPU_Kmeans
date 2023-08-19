@@ -2,13 +2,17 @@
 #include <vector>
 #include <random>
 #include <iomanip>
-#include <cub/cub.cuh>
 #include <cmath>
+#include <limits>
+#include <cublas_v2.h>
 
-#include "../include/common.h"
-#include "../include/colors.h"
+#include "include/common.h"
+#include "include/colors.h"
+
+#include "utils.cuh"
 #include "kmeans.cuh"
-#include "../lib/cuda/utils.cuh"
+
+#include "kernels/kernels.cuh"
 
 using namespace std;
 
@@ -16,102 +20,23 @@ random_device rd;
 seed_seq seed{0}; // FIXME use rd()
 mt19937 rng(seed);
 
-__host__ __device__ unsigned int next_pow_2(unsigned int x) {
-  --x;
-  x |= x >> 1;
-  x |= x >> 2;
-  x |= x >> 4;
-  x |= x >> 8;
-  x |= x >> 16;
-  return ++x;
-}
-
-#define SHFL_MASK 0xffffffff
-/* Device kernels */
-__global__ void compute_distances_one_point_per_warp(DATA_TYPE* distances, DATA_TYPE* centers, DATA_TYPE* points) {
-  const uint64_t point_offset = blockIdx.x * blockDim.x + threadIdx.x;
-  const uint64_t center_offset = blockIdx.y * blockDim.x + threadIdx.x;
-  DATA_TYPE dist = points[point_offset] - centers[center_offset];
-  dist *= dist;
-  
-  for (int i = next_pow_2(blockDim.x); i > 0; i /= 2)
-    dist += __shfl_down_sync(SHFL_MASK, dist, i);
-
-  if (threadIdx.x == 0) {
-    distances[(blockIdx.x * gridDim.y) + blockIdx.y] = dist;
-  }
-}
-
-__global__ void compute_distances_shmem(DATA_TYPE* distances, DATA_TYPE* centers, DATA_TYPE* points, const uint32_t points_per_warp, const uint32_t d) {
-  const uint64_t point_i = (blockIdx.x * points_per_warp) + (threadIdx.x / d);
-  const uint64_t center_i = blockIdx.y;
-  const uint32_t d_i = threadIdx.x % d;
-  const uint64_t dists_i = (center_i * blockDim.y * d) + ((point_i % points_per_warp) * d) + d_i;
-
-  extern __shared__ DATA_TYPE dists[];
-
-  if (threadIdx.x < points_per_warp * d) {
-    DATA_TYPE dist = fabs(points[point_i * d + d_i] - centers[center_i * d + d_i]);
-    dists[dists_i] = dist * dist;
-    __syncthreads();
-    if (d_i == 0) {
-      for (int i = 1; i < d; i++) {
-        dists[dists_i] += dists[dists_i + i];
-      }
-      distances[(point_i * center_i) + point_i] = dists[dists_i];
-    }
-  }
-}
-
-__global__ void compute_distances_shfl(DATA_TYPE* distances, DATA_TYPE* centers, DATA_TYPE* points, const uint32_t points_n, const uint32_t points_per_warp, const uint32_t d, const uint32_t d_closest_2_pow) {
-  const uint64_t point_i = (blockIdx.x * points_per_warp) + (threadIdx.x / d_closest_2_pow);
-  const uint64_t center_i = blockIdx.y;
-  const uint32_t d_i = threadIdx.x % d_closest_2_pow;
-
-  if (point_i < points_n && d_i < d) {
-    DATA_TYPE dist = fabs(points[point_i * d + d_i] - centers[center_i * d + d_i]);
-    dist *= dist;
-    for (int i = d_closest_2_pow / 2; i > 0; i /= 2) {
-      dist += __shfl_down_sync(SHFL_MASK, dist, i);
-      // if (point_i == 3) printf("%d  p: %lu c: %lu d: %u v: %.3f\n", i, point_i, center_i, d_i, dist);
-    }
-    if (d_i == 0) {
-      distances[(point_i * gridDim.y) + center_i] = dist;
-    }
-  }
-}
-
-__global__ void compute_centers(DATA_TYPE* centers, DATA_TYPE* points, uint32_t* points_clusters, uint64_t* clusters_len) {
-  uint32_t point   = blockIdx.x;
-  uint32_t cluster = points_clusters[point];
-  uint32_t d       = blockDim.x;
-  uint32_t d_i     = threadIdx.x;
-  // extern __shared__ DATA_TYPE centers_shared[];
-  
-  // if (point >= clusters_len[cluster]) { return; }
-
-  DATA_TYPE val = points[point * d + d_i];
-  
-  // if (cluster == 0 && d_i == 1) printf("cl: %u p: %u d: %u p_d: %.3f\n", cluster, point, d_i, val);
-  
-  // for (int i = next_pow_2(blockDim.x); i > 0; i /= 2) sum += __shfl_down_sync(SHFL_MASK, sum, i);
-  // atomicAdd(centers_shared + cluster * d + d_i, val);
-  // __syncthreads();
-  
-  //if (point == 0) {
-  atomicAdd(centers + cluster * d + d_i, val);  
-  // if (cluster == 0 && d_i == 1) printf("blk: %u %u %u, part_sum: %.3f\n", blockIdx.x, blockIdx.y, threadIdx.x, centers[cluster * d + d_i]);
-  //}
-}
+const DATA_TYPE INFNTY  = numeric_limits<DATA_TYPE>::infinity();
+const DATA_TYPE EPSILON = numeric_limits<DATA_TYPE>::epsilon();
 
 /* Kmeans class */
-void Kmeans::initCenters (Point<DATA_TYPE>** points) {
+void Kmeans::init_centroids (Point<DATA_TYPE>** points) {
   uniform_int_distribution<int> random_int(0, n - 1);
-  CHECK_CUDA_ERROR(cudaHostAlloc(&h_centers, CENTERS_BYTES, cudaHostAllocDefault));
-  CHECK_CUDA_ERROR(cudaHostAlloc(&h_last_centers, CENTERS_BYTES, cudaHostAllocDefault));
+  if (COMPUTE_DISTANCES_KERNEL > 2) {
+    CENTROIDS_BYTES += (k * sizeof(DATA_TYPE)); // FIXME be aware
+    CHECK_CUDA_ERROR(cudaHostAlloc(&h_centroids_matrix, CENTROIDS_BYTES, cudaHostAllocDefault));
+  } else {
+    h_centroids_matrix = NULL;
+  }
+  CHECK_CUDA_ERROR(cudaHostAlloc(&h_centroids, CENTROIDS_BYTES, cudaHostAllocDefault));
+  CHECK_CUDA_ERROR(cudaHostAlloc(&h_last_centroids, CENTROIDS_BYTES, cudaHostAllocDefault));
   unsigned int i = 0;
   vector<Point<DATA_TYPE>*> usedPoints;
-  Point<DATA_TYPE>* centers[k];
+  Point<DATA_TYPE>* centroids[k];
   while (i < k) {
     Point<DATA_TYPE>* p = points[random_int(rng)];
     bool found = false;
@@ -122,29 +47,37 @@ void Kmeans::initCenters (Point<DATA_TYPE>** points) {
       }
     }
     if (!found) {
-      for (unsigned int j = 0; j < d; ++j) {
-        h_centers[i * d + j] = p->get(j);
-      }
-      centers[i] = new Point<DATA_TYPE>(p);
+      centroids[i] = new Point<DATA_TYPE>(p);
       usedPoints.push_back(p);
       ++i;
     }
   }
-  if (DEBUG_INIT_CENTERS) { cout << endl << "Centers" << endl; for (i = 0; i < k; ++i) cout << *(centers[i]) << endl; }
 
-  CHECK_CUDA_ERROR(cudaHostAlloc(&h_centers, CENTERS_BYTES, cudaHostAllocDefault));
+  #if DEBUG_INIT_CENTROIDS
+    cout << endl << "Centroids" << endl; 
+    for (i = 0; i < k; ++i) 
+      cout << *(centroids[i]) << endl;
+  #endif
+
   for (size_t i = 0; i < k; ++i) {
     for (size_t j = 0; j < d; ++j) {
-      h_centers[i * d + j] = centers[i]->get(j);
+      h_centroids[i * d + j] = centroids[i]->get(j);                // Row major
+      #if COMPUTE_DISTANCES_KERNEL > 2
+        h_centroids_matrix[(j + 1) * k + i] = centroids[i]->get(j); // Col major
+      #endif
     }
   }
-  CHECK_CUDA_ERROR(cudaMalloc(&d_centers, CENTERS_BYTES));
+  #if COMPUTE_DISTANCES_KERNEL > 2
+    for (size_t i = 0; i < k; ++i)
+      h_centroids_matrix[i] = 1; // Static prefix
+  #endif
+  CHECK_CUDA_ERROR(cudaMalloc(&d_centroids, CENTROIDS_BYTES));
 }
 
 Kmeans::Kmeans (size_t _n, unsigned int _d, unsigned int _k, Point<DATA_TYPE>** _points, cudaDeviceProp* _deviceProps)
     : n(_n), d(_d), k(_k),
     POINTS_BYTES(_n * _d * sizeof(DATA_TYPE)),
-    CENTERS_BYTES(_k * _d * sizeof(DATA_TYPE)),
+    CENTROIDS_BYTES(_k * _d * sizeof(DATA_TYPE)),
     points(_points),
     deviceProps(_deviceProps) {
 
@@ -157,16 +90,20 @@ Kmeans::Kmeans (size_t _n, unsigned int _d, unsigned int _k, Point<DATA_TYPE>** 
   CHECK_CUDA_ERROR(cudaMalloc(&d_points, POINTS_BYTES));
   CHECK_CUDA_ERROR(cudaMemcpy(d_points, h_points, POINTS_BYTES, cudaMemcpyHostToDevice));
 
-  initCenters(_points);
+  init_centroids(_points);
+  cudaDeviceSynchronize(); // FIXME?
 }
 
 Kmeans::~Kmeans () {
   CHECK_CUDA_ERROR(cudaFreeHost(h_points));
-  CHECK_CUDA_ERROR(cudaFreeHost(h_centers));
-  CHECK_CUDA_ERROR(cudaFreeHost(h_last_centers));
+  CHECK_CUDA_ERROR(cudaFreeHost(h_centroids));
+  CHECK_CUDA_ERROR(cudaFreeHost(h_last_centroids));
   CHECK_CUDA_ERROR(cudaFreeHost(h_points_clusters));
-  CHECK_CUDA_ERROR(cudaFree(d_centers));
+  CHECK_CUDA_ERROR(cudaFree(d_centroids));
   CHECK_CUDA_ERROR(cudaFree(d_points));
+  if (h_centroids_matrix != NULL) {
+    CHECK_CUDA_ERROR(cudaFreeHost(h_centroids_matrix));
+  }
 }
 
 uint64_t Kmeans::run (uint64_t maxiter) {
@@ -178,171 +115,280 @@ uint64_t Kmeans::run (uint64_t maxiter) {
   uint32_t* d_points_clusters;
   CHECK_CUDA_ERROR(cudaMalloc(&d_points_clusters, n * sizeof(uint32_t)));
   CHECK_CUDA_ERROR(cudaMallocHost(&h_points_clusters, n * sizeof(uint32_t)));
-  uint64_t* h_clusters_len;
-  CHECK_CUDA_ERROR(cudaMallocHost(&h_clusters_len, k * sizeof(uint64_t)));
-  uint64_t* d_clusters_len;
-  CHECK_CUDA_ERROR(cudaMalloc(&d_clusters_len, k * sizeof(uint64_t)));
+  uint32_t* d_clusters_len;
+  CHECK_CUDA_ERROR(cudaMalloc(&d_clusters_len, k * sizeof(uint32_t)));
 
   uint64_t iter = 0;
-  uint64_t max_cluster_len = 0;
-  dim3 argmin_block_dim(k, d);
+  const uint32_t rounds = ((d - 1) / deviceProps->warpSize) + 1;
 
-  #if COMPUTE_DISTANCES_KERNEL == 1
+  #if COMPUTE_DISTANCES_KERNEL == 0
     const uint32_t dist_max_points_per_warp = deviceProps->warpSize / d;
     dim3 dist_grid_dim(ceil(((float) n) / dist_max_points_per_warp), k);
     dim3 dist_block_dim(dist_max_points_per_warp * d);
     uint32_t dist_kernel_sh_mem = k * dist_max_points_per_warp * d * sizeof(DATA_TYPE);
-  #elif COMPUTE_DISTANCES_KERNEL == 2
-    const uint32_t dist_max_points_per_warp = deviceProps->warpSize / next_pow_2(d);
+  #elif COMPUTE_DISTANCES_KERNEL == 1
+    const uint32_t dist_max_points_per_warp = deviceProps->warpSize / next_pow_2(d); // FIXME k > 32
     dim3 dist_grid_dim(ceil(((float) n) / dist_max_points_per_warp), k);
     dim3 dist_block_dim(dist_max_points_per_warp * next_pow_2(d));
     uint32_t dist_kernel_sh_mem = 0;
-  #else
+  #elif COMPUTE_DISTANCES_KERNEL == 2
     dim3 dist_grid_dim(n, k);
     dim3 dist_block_dim(d);
     uint32_t dist_kernel_sh_mem = 0;
+  #else
+    DATA_TYPE* d_points_assoc_matrices;
+    DATA_TYPE* d_centroids_matrix;
+    uint32_t d1 = d + 1;
+    uint32_t nd1d1 = n * d1 * d1;
+    // Associated to POINTS (centers change after every iteration)
+    CHECK_CUDA_ERROR(cudaMalloc(&d_points_assoc_matrices, nd1d1 * sizeof(DATA_TYPE)));
+    CHECK_CUDA_ERROR(cudaMemset(d_points_assoc_matrices, 0, nd1d1 * sizeof(DATA_TYPE)));
+    CHECK_CUDA_ERROR(cudaMalloc(&d_centroids_matrix, CENTROIDS_BYTES));
+    dim3 dist_assoc_matrices_grid_dim(n);
+    dim3 dist_assoc_matrices_block_dim(min(d, deviceProps->warpSize));
+    for (uint32_t i = 0; i < rounds; i++) {
+      compute_point_associated_matrices<<<dist_assoc_matrices_grid_dim, dist_assoc_matrices_block_dim>>>(d_points, d_points_assoc_matrices, d, i);
+    }
+    cublasHandle_t cublasHandle;
+    CHECK_CUBLAS_ERROR(cublasCreate(&cublasHandle));
   #endif
+
+  dim3 argmin_grid_dim, argmin_block_dim;
+  uint32_t argmin_warps_per_block, argmin_sh_mem;
+  schedule_argmin_kernel(deviceProps, n, k, &argmin_grid_dim, &argmin_block_dim, &argmin_warps_per_block, &argmin_sh_mem);
   
+  dim3 cent_grid_dim, cent_block_dim;
+  schedule_centroids_kernel(deviceProps, n, d, k, &cent_grid_dim, &cent_block_dim);
 
   /* MAIN LOOP */
   while (iter++ < maxiter) {
-
     /* COMPUTE DISTANCES */
-    CHECK_CUDA_ERROR(cudaMemcpy(d_centers, h_centers, CENTERS_BYTES, cudaMemcpyHostToDevice));
-    if (DEBUG_KERNELS_INVOKATION) printf(YELLOW "[KERNEL]" RESET " compute_distances: Grid (%d, %d, %d), Block (%d, %d, %d), Sh.mem. %uB\n", dist_grid_dim.x, dist_grid_dim.y, dist_grid_dim.z, dist_block_dim.x, dist_block_dim.y, dist_block_dim.z, dist_kernel_sh_mem);
+    
+    #if COMPUTE_DISTANCES_KERNEL > 2
+      if (DEBUG_KERNELS_INVOKATION) printf(YELLOW "[KERNEL]" RESET " Matmul\n");
+    #else
+      if (DEBUG_KERNELS_INVOKATION) printf(YELLOW "[KERNEL]" RESET " %-25s: Grid (%4u, %4u, %4u), Block (%4u, %4u, %4u), Sh.mem. %uB\n", "compute_distances", dist_grid_dim.x, dist_grid_dim.y, dist_grid_dim.z, dist_block_dim.x, dist_block_dim.y, dist_block_dim.z, dist_kernel_sh_mem);
+    #endif
     #if PERFORMANCES_KERNEL_DISTANCES
       cudaEvent_t e_perf_dist_start, e_perf_dist_stop;
       cudaEventCreate(&e_perf_dist_start);
       cudaEventCreate(&e_perf_dist_stop);
       cudaEventRecord(e_perf_dist_start);
     #endif
-    #if COMPUTE_DISTANCES_KERNEL == 1
-      compute_distances_shmem<<<dist_grid_dim, dist_block_dim, dist_kernel_sh_mem>>>(d_distances, d_centers, d_points, dist_max_points_per_warp, d);
-    #elif COMPUTE_DISTANCES_KERNEL == 2     
-      compute_distances_shfl<<<dist_grid_dim, dist_block_dim>>>(d_distances, d_centers, d_points, n, dist_max_points_per_warp, d, next_pow_2(d));
+    #if COMPUTE_DISTANCES_KERNEL == 0
+      compute_distances_shmem<<<dist_grid_dim, dist_block_dim, dist_kernel_sh_mem>>>(d_distances, d_centroids, d_points, dist_max_points_per_warp, d);
+    #elif COMPUTE_DISTANCES_KERNEL == 1
+      compute_distances_shfl<<<dist_grid_dim, dist_block_dim>>>(d_distances, d_centroids, d_points, n, dist_max_points_per_warp, d, next_pow_2(d));
+    #elif COMPUTE_DISTANCES_KERNEL == 2
+      compute_distances_one_point_per_warp<<<dist_grid_dim, dist_block_dim>>>(d_distances, d_centroids, d_points, next_pow_2(dist_block_dim.x));
     #else
-      compute_distances_one_point_per_warp<<<dist_grid_dim, dist_block_dim>>>(d_distances, d_centers, d_points);
+      CHECK_CUBLAS_ERROR(cublasSetMatrix(k, d1, sizeof(DATA_TYPE), h_centroids_matrix, k, d_centroids_matrix, k)); // same as CHECK_CUDA_ERROR(cudaMemcpy(d_centroids_matrix, h_centroids_matrix, CENTROIDS_BYTES, cudaMemcpyHostToDevice));
+      compute_gemm_distances(cublasHandle, d1, n, k, d_points_assoc_matrices, d_centroids_matrix, d_distances);
     #endif
-    CHECK_LAST_CUDA_ERROR();
+    CHECK_CUDA_ERROR(cudaDeviceSynchronize()); // FIXME??
     #if PERFORMANCES_KERNEL_DISTANCES
       cudaEventRecord(e_perf_dist_stop);
       cudaEventSynchronize(e_perf_dist_stop);
       float e_perf_dist_ms = 0;
       cudaEventElapsedTime(&e_perf_dist_ms, e_perf_dist_start, e_perf_dist_stop);
-      printf(CYAN "[PERFORMANCE]" RESET " compute_distances time: %.6f\n", e_perf_dist_ms / 1000);
+      printf(CYAN "[PERFORMANCE]" RESET " compute_distances time: %.8f\n", e_perf_dist_ms / 1000);
       cudaEventDestroy(e_perf_dist_start);
       cudaEventDestroy(e_perf_dist_stop);
     #endif
 
     #if DEBUG_KERNEL_DISTANCES
       printf(GREEN "[DEBUG_KERNEL_DISTANCES]\n");
-      DATA_TYPE tmp[n * k];
-      CHECK_CUDA_ERROR(cudaMemcpy(tmp, d_distances, n * k * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost));
-      cudaDeviceSynchronize();
+      #if COMPUTE_DISTANCES_KERNEL > 2
+        cout << "Centroids matrix" << endl;
+        printMatrixColMaj(h_centroids_matrix, k, d1);
+        cout << endl;
+        DATA_TYPE tmp_assoc_mat[(d + 1) * (d + 1)];
+        uint32_t d1d1 = d1 * d1;
+        for (size_t i = 0; i < 1; i++) {
+          cout << "Point " << i << " associated matrix" << endl;
+          CHECK_CUDA_ERROR(cudaMemcpy(tmp_assoc_mat, d_points_assoc_matrices + (d1d1 * i), d1d1 * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost));
+          printMatrixColMaj(tmp_assoc_mat, d1, d1);
+          cout << endl;
+        }
+      #endif
+      DATA_TYPE* cpu_distances = new DATA_TYPE[n * k];
+      for (uint32_t ni = 0; ni < n; ++ni) {
+        for (uint32_t ki = 0; ki < k; ++ki) {
+          DATA_TYPE dist = 0, tmp;
+          for (uint32_t di = 0; di < d; ++di) {
+            tmp = h_points[ni * d + di] - h_centroids[ki * d + di];
+            dist += tmp * tmp;
+          }
+          cpu_distances[ni * k + ki] = dist;
+        }
+      }
+      DATA_TYPE* tmp_dist = new DATA_TYPE[n * k];
+      CHECK_CUDA_ERROR(cudaMemcpy(tmp_dist, d_distances, n * k * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost));
       for (uint32_t i = 0; i < n; ++i)
         for (uint32_t j = 0; j < k; ++j)
-          printf("%u %u -> %.3f\n", i, j, tmp[i * k + j]);
+          printf("N=%-2u K=%-2u -> GPU=%.3f CPU=%.3f %d\n", i, j, tmp_dist[i * k + j], cpu_distances[i * k + j], tmp_dist[i * k + j] == cpu_distances[i * k + j]);
+      cout << RESET << endl;
+      delete[] cpu_distances;
+      delete[] tmp_dist;
+    #endif
+
+    ////////////////////////////////////////* ASSIGN POINTS TO NEW CLUSTERS */////////////////////////////////////////
+    
+    #if PERFORMANCES_KERNEL_ARGMIN
+      cudaEvent_t e_perf_argmin_start, e_perf_argmin_stop;
+      cudaEventCreate(&e_perf_argmin_start);
+      cudaEventCreate(&e_perf_argmin_stop);
+      cudaEventRecord(e_perf_argmin_start);
+    #endif
+    
+    if (DEBUG_KERNELS_INVOKATION) printf(YELLOW "[KERNEL]" RESET " %-25s: Grid (%4u, %4u, %4u), Block (%4u, %4u, %4u), Sh.mem. %uB\n", "clusters_argmin_shfl", argmin_grid_dim.x, argmin_grid_dim.y, argmin_grid_dim.z, argmin_block_dim.x, argmin_block_dim.y, argmin_block_dim.z, argmin_sh_mem);
+    
+    CHECK_CUDA_ERROR(cudaMemset(d_clusters_len, 0, k * sizeof(uint32_t)));
+    clusters_argmin_shfl<<<argmin_grid_dim, argmin_block_dim, argmin_sh_mem>>>(n, k, d_distances, d_points_clusters, d_clusters_len, argmin_warps_per_block, INFNTY);
+    CHECK_CUDA_ERROR(cudaDeviceSynchronize()); 
+    
+    #if PERFORMANCES_KERNEL_ARGMIN
+      cudaEventRecord(e_perf_argmin_stop);
+      cudaEventSynchronize(e_perf_argmin_stop);
+      float e_perf_argmin_ms = 0;
+      cudaEventElapsedTime(&e_perf_argmin_ms, e_perf_argmin_start, e_perf_argmin_stop);
+      printf(CYAN "[PERFORMANCE]" RESET " clusters_argmin_shfl time: %.8f\n", e_perf_argmin_ms / 1000);
+      cudaEventDestroy(e_perf_argmin_stop);
+      cudaEventDestroy(e_perf_argmin_start);
+    #endif
+    
+    #if DEBUG_KERNEL_ARGMIN
+      printf(GREEN "[DEBUG_KERNEL_ARGMIN]\n" RESET);
+      uint32_t tmp1[n];
+      CHECK_CUDA_ERROR(cudaMemcpy(tmp1, d_points_clusters, n * sizeof(uint32_t), cudaMemcpyDeviceToHost));
+      printf(GREEN "p  -> c\n");
+      for (uint32_t i = 0; i < n; ++i)
+          printf("%-2u -> %-2u\n", i, tmp1[i]);
       cout << RESET << endl;
     #endif
 
+    ///////////////////////////////////////////* COMPUTE NEW CENTROIDS *///////////////////////////////////////////
+    
+    CHECK_CUDA_ERROR(cudaMemset(h_centroids, 0, k * d * sizeof(DATA_TYPE)));
+    CHECK_CUDA_ERROR(cudaMemset(d_centroids, 0, k * d * sizeof(DATA_TYPE)));
 
-    /* ASSIGN POINTS TO NEW CLUSTERS */
-    #if DEBUG_KERNEL_ARGMIN
-      printf("DEBUG_KERNEL_ARGMIN\n");
+    #if PERFORMANCES_KERNEL_CENTROIDS
+      cudaEvent_t e_perf_cent_start, e_perf_cent_stop;
+      cudaEventCreate(&e_perf_cent_start);
+      cudaEventCreate(&e_perf_cent_stop);
+      cudaEventRecord(e_perf_cent_start);
     #endif
-    memset(h_clusters_len, 0, k * sizeof(uint64_t));
-    for (size_t i = 0; i < n; i++) {
-      cub::KeyValuePair<int32_t, DATA_TYPE> *d_argmin = NULL;
-      CHECK_CUDA_ERROR(cudaMalloc(&d_argmin, sizeof(int32_t) + sizeof(DATA_TYPE)));
-      // Allocate temporary storage
-      void *d_temp_storage = NULL; size_t temp_storage_bytes = 0;
-      cub::DeviceReduce::ArgMin(d_temp_storage, temp_storage_bytes, d_distances, d_argmin, k);
-      CHECK_CUDA_ERROR(cudaMalloc(&d_temp_storage, temp_storage_bytes));
-      
-      // Run argmin-reduction
-      cub::DeviceReduce::ArgMin(d_temp_storage, temp_storage_bytes, d_distances + i * k, d_argmin, k);
 
-      int32_t argmin_idx;
-      DATA_TYPE argmin_val;
-      CHECK_CUDA_ERROR(cudaMemcpy(&argmin_idx, &(d_argmin->key), sizeof(int32_t), cudaMemcpyDeviceToHost));
-      CHECK_CUDA_ERROR(cudaMemcpy(&argmin_val, &(d_argmin->value), sizeof(DATA_TYPE), cudaMemcpyDeviceToHost));
-      CHECK_CUDA_ERROR(cudaFree(d_temp_storage));
-      CHECK_CUDA_ERROR(cudaFree(d_argmin));
-      CHECK_CUDA_ERROR(cudaDeviceSynchronize());
+    if (DEBUG_KERNELS_INVOKATION) printf(YELLOW "[KERNEL]" RESET " %-25s: Grid (%4u, %4u, %4u), Block (%4u, %4u, %4u)\n", "compute_centroids", cent_grid_dim.x, cent_grid_dim.y, cent_grid_dim.z, cent_block_dim.x, cent_block_dim.y, cent_block_dim.z);
 
-      #if DEBUG_KERNEL_ARGMIN
-        printf("Argmin point %lu: %d %.3f\n", i, argmin_idx, argmin_val);
-      #endif
-
-      ++h_clusters_len[argmin_idx];
-      max_cluster_len = max_cluster_len > h_clusters_len[argmin_idx] ? max_cluster_len : h_clusters_len[argmin_idx];
-      h_points_clusters[i] = argmin_idx;
+    for (uint32_t i = 0; i < rounds; i++) {
+      compute_centroids_shfl<<<cent_grid_dim, cent_block_dim>>>(d_centroids, d_points, d_points_clusters, d_clusters_len, n, d, k, i);
     }
-    #if DEBUG_KERNEL_ARGMIN
-      printf("\n");
+    CHECK_CUDA_ERROR(cudaDeviceSynchronize()); 
+
+    #if PERFORMANCES_KERNEL_CENTROIDS
+      cudaEventRecord(e_perf_cent_stop);
+      cudaEventSynchronize(e_perf_cent_stop);
+      float e_perf_cent_ms = 0;
+      cudaEventElapsedTime(&e_perf_cent_ms, e_perf_cent_start, e_perf_cent_stop);
+      printf(CYAN "[PERFORMANCE]" RESET " compute_centroids time: %.8f\n", e_perf_cent_ms / 1000);
+      cudaEventDestroy(e_perf_cent_start);
+      cudaEventDestroy(e_perf_cent_stop);
     #endif
-    CHECK_CUDA_ERROR(cudaMemcpy(d_points_clusters, h_points_clusters, n * sizeof(uint32_t), cudaMemcpyHostToDevice));
-    CHECK_CUDA_ERROR(cudaMemcpy(d_clusters_len, h_clusters_len, k * sizeof(uint64_t), cudaMemcpyHostToDevice));
-    
 
-    /* COMPUTE NEW CENTERS */
-    cudaMemset(d_centers, 0, k * d * sizeof(DATA_TYPE));
-    dim3 centers_grid_dim(n);
-    if (DEBUG_KERNELS_INVOKATION) printf(YELLOW "[KERNEL]" RESET "compute_centers: Grid (%d, %d, %d), Block (%d, %d, %d)\n", centers_grid_dim.x, centers_grid_dim.y, centers_grid_dim.z, d, 1, 1);
-    compute_centers<<<centers_grid_dim, d/*, k * d * sizeof(DATA_TYPE) */>>>(d_centers, d_points, d_points_clusters, d_clusters_len);
-    CHECK_LAST_CUDA_ERROR();
-
-    CHECK_CUDA_ERROR(cudaMemcpy(h_centers, d_centers, d * k * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost));
-    for (uint32_t i = 0; i < k; ++i)
-        for (uint32_t j = 0; j < d; ++j)
-          h_centers[i * d + j] /= h_clusters_len[i];
-    
-
-    #if DEBUG_KERNEL_CENTERS
-      printf("DEBUG_KERNEL_CENTERS\n");
-      cout << endl << "CENTERS" << endl;
+    #if DEBUG_KERNEL_CENTROIDS
+      uint32_t* h_clusters_len;
+      CHECK_CUDA_ERROR(cudaMallocHost(&h_clusters_len, k * sizeof(uint32_t)));
+      CHECK_CUDA_ERROR(cudaMemcpy(h_points_clusters, d_points_clusters, n * sizeof(uint32_t), cudaMemcpyDeviceToHost));
+      CHECK_CUDA_ERROR(cudaMemcpy(h_clusters_len,    d_clusters_len,    k * sizeof(uint32_t), cudaMemcpyDeviceToHost));
+      for (uint32_t i = 0; i < n; ++i) {
+        for (uint32_t j = 0; j < d; ++j) {
+          h_centroids[h_points_clusters[i] * d + j] += h_points[i * d + j];
+        }
+      } 
+      for (uint32_t i = 0; i < k; ++i) {
+        for (uint32_t j = 0; j < d; ++j) {
+          uint64_t count = h_clusters_len[i] > 1 ? h_clusters_len[i] : 1; 
+          DATA_TYPE scale = 1.0 / ((double) count); 
+          h_centroids[i * d + j] *= scale;    
+        }
+      } 
+      cout << GREEN "[DEBUG_KERNEL_CENTROIDS]" << endl;
+      cout << endl << "CENTROIDS (CPU)" << endl;
       for (uint32_t i = 0; i < k; ++i) {
         for (uint32_t j = 0; j < d; ++j)
-          printf("%.3f, ", h_centers[i * d + j]);
+          printf("%.3f, ", h_centroids[i * d + j]);
         cout << endl;
       }
-      cout << endl;
+      CHECK_CUDA_ERROR(cudaMemset(h_centroids, 0, d * k * sizeof(DATA_TYPE)));     
+      CHECK_CUDA_ERROR(cudaMemcpy(h_centroids, d_centroids, d * k * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost));
+      cout << endl << "CENTROIDS (GPU)" << endl;
+      for (uint32_t i = 0; i < k; ++i) {
+        for (uint32_t j = 0; j < d; ++j)
+          printf("%.3f, ", h_centroids[i * d + j]);
+        cout << endl;
+      }
+      cout << RESET << endl;
+      CHECK_CUDA_ERROR(cudaFreeHost(h_clusters_len));
     #endif
 
-    /* CHECK IF CONVERGED */
-    if (iter > 1 && cmpCenters()) { // Exit
-      converged = iter;
-      break;
-    } else { // Copy centers
-      memcpy(h_last_centers, h_centers, CENTERS_BYTES);
+    CHECK_CUDA_ERROR(cudaMemcpy(h_centroids, d_centroids, d * k * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost));
+
+    /////////////////////////////////////////////* CHECK IF CONVERGED */////////////////////////////////////////////
+    
+    // Check exit
+    if (iter > 1 && cmp_centroids()) { 
+      converged = iter; 
+      break; 
     }
+    
+    // Copy current centroids
+    memcpy(h_last_centroids, h_centroids, CENTROIDS_BYTES); 
+
+    #if COMPUTE_DISTANCES_KERNEL > 2
+      /* UPDATE h_centroids_matrix */
+      for (size_t i = 0; i < k; ++i) {
+        h_centroids_matrix[i] = 1; // Static prefix
+        for (size_t j = 0; j < d; ++j) {
+          h_centroids_matrix[IDX2C(i, j + 1, k)] = h_centroids[i * d + j]; // Row maj to Col maj
+        }
+      }
+    #endif
+    
   }
   /* MAIN LOOP END */
 
   /* COPY BACK RESULTS*/
+  CHECK_CUDA_ERROR(cudaMemcpy(h_points_clusters, d_points_clusters, n * sizeof(uint32_t), cudaMemcpyDeviceToHost));
   for (size_t i = 0; i < n; i++) {
     points[i]->setCluster(h_points_clusters[i]);
   }
   
-
   /* FREE MEMORY */
-  CHECK_CUDA_ERROR(cudaMalloc(&d_clusters_len, k * sizeof(uint64_t)));
   CHECK_CUDA_ERROR(cudaFree(d_distances));
   CHECK_CUDA_ERROR(cudaFree(d_points_clusters));
   CHECK_CUDA_ERROR(cudaFree(d_clusters_len));
-  CHECK_CUDA_ERROR(cudaFreeHost(h_clusters_len));
+  #if COMPUTE_DISTANCES_KERNEL > 2
+    CHECK_CUDA_ERROR(cudaFree(d_points_assoc_matrices));
+    CHECK_CUDA_ERROR(cudaFree(d_centroids_matrix));
+    CHECK_CUBLAS_ERROR(cublasDestroy(cublasHandle));
+  #endif
 
   return converged;
 }
 
-bool Kmeans::cmpCenters () {
-  const DATA_TYPE EPSILON = numeric_limits<DATA_TYPE>::epsilon();
-  for (uint32_t i = 0; i < k; ++i)
-        for (uint32_t j = 0; j < d; ++j)
-          if (fabs(h_centers[i * d + j] - h_last_centers[i * d + j]) >= EPSILON)
-            return false;
+bool Kmeans::cmp_centroids () {
+  DATA_TYPE dist_sum = 0;
+  
+  for (size_t i = 0; i < k; ++i) {
+    for (size_t j = 0; j < d; ++j) {
+      DATA_TYPE dist = h_centroids[i * d + j] - h_last_centroids[i * d + j];
+      dist_sum += dist * dist;
+    }
+    if (sqrt(dist_sum) > EPSILON) { return false; }
+  }
+
   return true;
-  // return memcmp(h_centers, h_last_centers, CENTERS_BYTES);
 }
 
 void Kmeans::to_csv(ostream& o, char separator) {

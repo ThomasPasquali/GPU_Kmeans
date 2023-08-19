@@ -5,7 +5,7 @@
 #include "point.hpp"
 
 #define SEPARATOR ","
-#define MAX_LINE  4096
+#define MAX_LINE  8192
 
 using namespace std;
 
@@ -26,6 +26,7 @@ class InputParser {
       for (size_t i = 0; i <= _n; i++) {
         char str[MAX_LINE] = { 0 };
         in >> str;
+        // printf("%s,\n", str);
         
         if (i == (size_t)0) { continue; }
         if (!str[0]) { break; }
@@ -53,17 +54,21 @@ class InputParser {
 
     friend ostream& operator<< (ostream &os, InputParser const& p) {
       const int W = 9;
-      size_t count = 0;
-      os << "i  cluster";
+      os << "   i  cluster";
       for (int i = 0; i < p.d; ++i) {
         char s[W];
         sprintf(s, "d%d", i);
         os << setw(W) << s;
       }
       os << endl;
-      for (size_t i = 0; i < p.n; ++i) {
-        os << setw(-W) << (count++) << setw(W) << *p.dataset[i] << endl; 
-        // i == (p.n - 1) ? os << "" : os << ", ";
+      for (size_t i = 0; i < min(p.n, (size_t)5); ++i) {
+        os << setw(4) << i << setw(W) << *p.dataset[i] << endl;
+      }
+      if (p.n > 5) {
+        os << " ..." << endl; 
+        for (size_t i = p.n - 5; i < p.n; ++i) {
+          os << setw(4) << i << setw(W) << *p.dataset[i] << endl;
+        }
       }
       os << endl << "[" << p.n << " rows x " << p.d << " columns]" << endl;
       return os;

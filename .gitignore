@@ -1,7 +1,11 @@
 ## DIRECTORIES
 bin
 .vscode
+build
 
 ## FILES
 out/*/*.csv
 temp-plot.html
+
+## Testing framework
+Catch2

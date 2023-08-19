@@ -4,20 +4,22 @@
 #include <string>
 #include <fstream>
 
-#include "../include/common.h"
-#include "../include/colors.h"
-#include "../include/cxxopts.hpp"
-#include "../include/input_parser.hpp"
-#include "../include/errors.hpp"
-#include "../lib/cuda/utils.cuh"
-#include "./kmeans.cuh"
+#include "include/common.h"
+#include "include/colors.h"
+#include "include/cxxopts.hpp"
+#include "include/input_parser.hpp"
+#include "include/errors.hpp"
+#include "utils.cuh"
+#include "kmeans.cuh"
 
+#define DEVICE          0
 #define ARG_DIMENSIONS  0
 #define ARG_SAMPLES     1
 #define ARG_CLUSTERS    2
 #define ARG_MAXITER     3
 #define ARG_OUTFILE     4
-const char* ARG_STR[5] = {"dimensions", "n-samples", "clusters", "maxiter", "out-file"};
+#define ARG_INFILE      5
+const char* ARG_STR[6] = {"dimensions", "n-samples", "clusters", "maxiter", "out-file", "in-file"};
 
 using namespace std;
 
@@ -51,7 +53,8 @@ int main(int argc, char **argv) {
     ("n,n-samples",   "Number of points",                 cxxopts::value<int>())
     ("k,clusters",    "Number of clusters",               cxxopts::value<int>())
     ("m,maxiter",     "Maximum number of iterations",     cxxopts::value<int>())
-    ("o,out-file",    "Output filename",                  cxxopts::value<string>());
+    ("o,out-file",    "Output filename",                  cxxopts::value<string>())
+    ("i,in-file",     "Input filename",                   cxxopts::value<string>());
 
   args = options.parse(argc, argv);
 
@@ -65,9 +68,25 @@ int main(int argc, char **argv) {
   unsigned int  k         = getArg_u(ARG_CLUSTERS);
   size_t        maxiter   = getArg_u(ARG_MAXITER);
   string        out_file  = getArg_s(ARG_OUTFILE);
+
+  InputParser<DATA_TYPE>* input;
+
+  if(args[ARG_STR[ARG_INFILE]].count() > 0) {
+    string in_file = getArg_s(ARG_INFILE);
+    filebuf fb;
+    if (fb.open(in_file, ios::in)) {
+      istream file(&fb);
+      input = new InputParser<DATA_TYPE>(file, d, n);
+      fb.close();
+    } else {
+      printErrDesc(EXIT_INVALID_INFILE);
+      exit(EXIT_INVALID_INFILE);
+    }
+  } else {
+    input = new InputParser<DATA_TYPE>(cin, d, n);
+  }
   
-  InputParser<DATA_TYPE> input(cin, d, n);
-  if (DEBUG_INPUT_DATA) cout << input << endl;
+  if (DEBUG_INPUT_DATA) cout << "Points" << endl << *input << endl;
 
   // Check devices
   int deviceCount = 0;
@@ -84,13 +103,11 @@ int main(int argc, char **argv) {
     printf("Detected %d CUDA Capable device(s)\n", deviceCount);
   }
 
-  int dev = 0;
-  cudaSetDevice(dev); // Use device 0 by default
   cudaDeviceProp deviceProp;
-  cudaGetDeviceProperties(&deviceProp, dev);
-  if (DEBUG_DEVICE) describeDevice(dev, deviceProp);
+  getDeviceProps(DEVICE, &deviceProp);
+  if (DEBUG_DEVICE) describeDevice(DEVICE, deviceProp);
   
-  Kmeans kmeans(n, d, k, input.get_dataset(), &deviceProp);
+  Kmeans kmeans(n, d, k, input->get_dataset(), &deviceProp);
   uint64_t converged = kmeans.run(maxiter);
 
   #if DEBUG_OUTPUT_INFO
