@@ -219,6 +219,7 @@ TEST_CASE("kernel_distances_warp", "[kernel][distances]") {
       DATA_TYPE *h_points = new DATA_TYPE[n * d];
       DATA_TYPE *h_centroids = new DATA_TYPE[k * d];
       DATA_TYPE *h_distances = new DATA_TYPE[n * k];
+      DATA_TYPE *h_distances_1 = new DATA_TYPE[n * k];
       if (TEST_DEBUG) printf("Points:\n");
       for (uint32_t i = 0; i < n; ++i) {
         for (uint32_t j = 0; j < d; ++j) {
@@ -237,19 +238,27 @@ TEST_CASE("kernel_distances_warp", "[kernel][distances]") {
       }
       DATA_TYPE *d_distances;
       cudaMalloc(&d_distances, sizeof(DATA_TYPE) * n * k);
+      DATA_TYPE *d_distances_1;
+      cudaMalloc(&d_distances_1, sizeof(DATA_TYPE) * n * k);
       DATA_TYPE *d_points;
       cudaMalloc(&d_points, sizeof(DATA_TYPE) * n * d);
       cudaMemcpy(d_points, h_points, sizeof(DATA_TYPE) * n * d, cudaMemcpyHostToDevice);
       DATA_TYPE *d_centroids;
       cudaMalloc(&d_centroids, sizeof(DATA_TYPE) * k * d);
       cudaMemcpy(d_centroids, h_centroids, sizeof(DATA_TYPE) * k * d, cudaMemcpyHostToDevice);
-
+      
+      // Test kernel SHUFFLE
       const uint32_t dist_max_points_per_warp = WARP_SIZE / next_pow_2(d);
       dim3 dist_grid_dim(ceil(((float) n) / dist_max_points_per_warp), k);
       dim3 dist_block_dim(dist_max_points_per_warp * next_pow_2(d));
-
       compute_distances_shfl<<<dist_grid_dim, dist_block_dim>>>(d_distances, d_centroids, d_points, n, dist_max_points_per_warp, d, next_pow_2(d));
       cudaMemcpy(h_distances, d_distances, sizeof(DATA_TYPE) * n * k,  cudaMemcpyDeviceToHost);
+
+      // Test kernel ONE POINT PER WARP
+      dim3 dist_grid_dim_1(n, k);
+      dim3 dist_block_dim_1(d);
+      compute_distances_one_point_per_warp<<<dist_grid_dim_1, dist_block_dim_1>>>(d_distances_1, d_centroids, d_points, next_pow_2(d));
+      cudaMemcpy(h_distances_1, d_distances_1, sizeof(DATA_TYPE) * n * k,  cudaMemcpyDeviceToHost);
 
       DATA_TYPE* cpu_distances = new DATA_TYPE[n * k];
       for (uint32_t ni = 0; ni < n; ++ni) {
@@ -270,14 +279,23 @@ TEST_CASE("kernel_distances_warp", "[kernel][distances]") {
         }
       }
       for (uint32_t i = 0; i < n * k; ++i) {
+        if (h_distances[i] - cpu_distances[i] >= EPSILON) {
+          printf("point: %u center: %u cmp: %.6f - %.6f = %.6f\n", i / k, i % k, h_distances[i], cpu_distances[i], h_distances[i] - cpu_distances[i]);
+        }
+        if (h_distances_1[i] - cpu_distances[i] >= EPSILON) {
+          printf("(1PointperWarp) point: %u center: %u cmp: %.6f - %.6f = %.6f\n", i / k, i % k, h_distances_1[i], cpu_distances[i], h_distances_1[i] - cpu_distances[i]);
+        }
         REQUIRE( h_distances[i] - cpu_distances[i] < EPSILON );
+        REQUIRE( h_distances_1[i] - cpu_distances[i] < EPSILON );
       }
 
       delete[] h_points;
       delete[] h_centroids;
       delete[] h_distances;
+      delete[] h_distances_1;
       delete[] cpu_distances;
       cudaFree(d_distances);
+      cudaFree(d_distances_1);
       cudaFree(d_points);
       cudaFree(d_centroids);
     }

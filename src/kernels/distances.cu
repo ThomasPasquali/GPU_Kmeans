@@ -15,7 +15,7 @@ __global__ void compute_distances_one_point_per_warp(DATA_TYPE* distances, DATA_
   DATA_TYPE dist = points[point_offset] - centroids[center_offset];
   dist *= dist;
   
-  for (int i = next_pow_2; i > 0; i /= 2)
+  for (int i = next_pow_2 / 4; i > 0; i /= 2)
     dist += __shfl_down_sync(DISTANCES_SHFL_MASK, dist, i);
 
   if (threadIdx.x == 0) {
