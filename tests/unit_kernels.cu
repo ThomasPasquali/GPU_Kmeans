@@ -9,7 +9,7 @@
 #include "../src/utils.cuh"
 #include "../src/include/common.h"
 
-#define TEST_DEBUG 0
+#define TEST_DEBUG 1
 #define WARP_SIZE  32
 
 const DATA_TYPE infty   = numeric_limits<DATA_TYPE>::infinity();
@@ -59,7 +59,7 @@ TEST_CASE("kernel_distances_matrix", "[kernel][distances]") {
   const unsigned int D[TESTS_N] = { 1,  2,  3, 11, 42, 1500,  500,  700};
   const unsigned int K[TESTS_N] = { 2,  6,  3, 11, 20,    5,   10,  506};
 
-  for (int test_i = 6; test_i < 7; ++test_i) {
+  for (int test_i = 0; test_i < 7; ++test_i) {
     printf("TTTTT %d\n", test_i);
     const unsigned int n = N[test_i];
     const unsigned int d = D[test_i];
@@ -217,6 +217,7 @@ TEST_CASE("kernel_distances_warp", "[kernel][distances]") {
       DATA_TYPE *h_points = new DATA_TYPE[n * d];
       DATA_TYPE *h_centroids = new DATA_TYPE[k * d];
       DATA_TYPE *h_distances = new DATA_TYPE[n * k];
+      if (TEST_DEBUG) printf("Points:\n");
       for (uint32_t i = 0; i < n; ++i) {
         for (uint32_t j = 0; j < d; ++j) {
           h_points[i * d + j] = std::rand() / 10002.32;
@@ -224,7 +225,7 @@ TEST_CASE("kernel_distances_warp", "[kernel][distances]") {
         }
         if (TEST_DEBUG) printf("\n");
       }
-      if (TEST_DEBUG) printf("\n");
+      if (TEST_DEBUG) printf("Centroids:\n");
       for (uint32_t i = 0; i < k; ++i) {
         for (uint32_t j = 0; j < d; ++j) {
           h_centroids[i * d + j] = static_cast <DATA_TYPE> (std::rand() / 10002.45);

@@ -1,6 +1,7 @@
 #include <cub/cub.cuh>
 #include "kernels.cuh"
 #include "../utils.cuh"
+#include "../include/colors.h"
 
 __device__ Pair shfl_xor_sync (Pair p, unsigned delta){
   return Pair{
