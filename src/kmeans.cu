@@ -171,14 +171,13 @@ uint64_t Kmeans::run (uint64_t maxiter) {
       cudaEventRecord(e_perf_dist_start);
     #endif
     #if COMPUTE_DISTANCES_KERNEL == 0
-      compute_distances_one_point_per_warp<<<dist_grid_dim, dist_block_dim>>>(d_distances, d_centroids, d_points, next_pow_2(dist_block_dim.x));
+      compute_distances_one_point_per_warp<<<dist_grid_dim, dist_block_dim>>>(d_distances, d_centroids, d_points, next_pow_2(d));
     #elif COMPUTE_DISTANCES_KERNEL == 1
-      compute_distances_shfl<<<dist_grid_dim, dist_block_dim>>>(d_distances, d_centroids, d_points, n, dist_max_points_per_warp, d, next_pow_2(d));
+      compute_distances_shfl<<<dist_grid_dim, dist_block_dim>>>(d_distances, d_centroids, d_points, n, dist_max_points_per_warp, d, log2(next_pow_2(d)));
     #else
       CHECK_CUBLAS_ERROR(cublasSetMatrix(k, d1, sizeof(DATA_TYPE), h_centroids_matrix, k, d_centroids_matrix, k)); // same as CHECK_CUDA_ERROR(cudaMemcpy(d_centroids_matrix, h_centroids_matrix, CENTROIDS_BYTES, cudaMemcpyHostToDevice));
       compute_gemm_distances(cublasHandle, d1, n, k, d_points_assoc_matrices, d_centroids_matrix, d_distances);
     #endif
-    CHECK_CUDA_ERROR(cudaDeviceSynchronize()); // FIXME??
     #if PERFORMANCES_KERNEL_DISTANCES
       cudaEventRecord(e_perf_dist_stop);
       cudaEventSynchronize(e_perf_dist_stop);

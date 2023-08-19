@@ -9,31 +9,51 @@
 
 /*** Warp oriented ***/
 
-__global__ void compute_distances_one_point_per_warp(DATA_TYPE* distances, DATA_TYPE* centroids, DATA_TYPE* points, uint32_t next_pow_2) {
+/**
+ * @brief This kernel will use exactly one warp to compute the distance between a point and a centroid thus is bounded to d <= 32. It uses shuffle to perform the reduction.
+ * 
+ * @param distances distances will be written here
+ * @param centroids 
+ * @param points 
+ * @param d_closest_2_pow passed as parameter to avoid useless computations
+ */
+__global__ void compute_distances_one_point_per_warp(DATA_TYPE* distances, const DATA_TYPE* centroids, const DATA_TYPE* points, const uint32_t d_closest_2_pow) {
   const uint64_t point_offset = blockIdx.x * blockDim.x + threadIdx.x;
   const uint64_t center_offset = blockIdx.y * blockDim.x + threadIdx.x;
+
   DATA_TYPE dist = points[point_offset] - centroids[center_offset];
   dist *= dist;
   
-  for (int i = next_pow_2 / 4; i > 0; i /= 2)
+  for (int i = (d_closest_2_pow >> 2); i > 0; i >>= 1) {
     dist += __shfl_down_sync(DISTANCES_SHFL_MASK, dist, i);
+  }
 
   if (threadIdx.x == 0) {
     distances[(blockIdx.x * gridDim.y) + blockIdx.y] = dist;
   }
 }
 
-__global__ void compute_distances_shfl(DATA_TYPE* distances, DATA_TYPE* centroids, DATA_TYPE* points, const uint32_t points_n, const uint32_t points_per_warp, const uint32_t d, const uint32_t d_closest_2_pow) {
-  const uint32_t point_i = (blockIdx.x * points_per_warp) + (threadIdx.x / d_closest_2_pow);
+/**
+ * @brief This kernel fits as many points in one warp as possible, bounded to d <= 32. It uses shuffle to perform the reduction: similar to compute_distances_one_point_per_warp.
+ * 
+ * @param distances distances will be written here
+ * @param centroids 
+ * @param points 
+ * @param points_n 
+ * @param points_per_warp passed as parameter to avoid useless computations
+ * @param d 
+ * @param d_closest_2_pow_log2 passed as parameter to avoid useless computations
+ */
+__global__ void compute_distances_shfl(DATA_TYPE* distances, const DATA_TYPE* centroids, const DATA_TYPE* points, const uint32_t points_n, const uint32_t points_per_warp, const uint32_t d, const uint32_t d_closest_2_pow_log2) {
+  const uint32_t point_i = (blockIdx.x * points_per_warp) + (threadIdx.x >> d_closest_2_pow_log2);
   const uint32_t center_i = blockIdx.y;
-  const uint32_t d_i = threadIdx.x % d_closest_2_pow;
+  const uint32_t d_i = threadIdx.x & (d_closest_2_pow_log2 >> 1);
 
   if (point_i < points_n && d_i < d) {
     DATA_TYPE dist = points[point_i * d + d_i] - centroids[center_i * d + d_i];
     dist *= dist;
-    for (int i = d_closest_2_pow / 4; i > 0; i /= 2) {
+    for (int i = (0b1 >> (d_closest_2_pow_log2 - 2)); i > 0; i >>= 1) {
       dist += __shfl_down_sync(DISTANCES_SHFL_MASK, dist, i);
-      // if (point_i == 1 && center_i == 2) printf("%d p: %u c: %u d: %u v: %.3f\n", i, point_i, center_i, d_i, dist);
     }
     if (d_i == 0) {
       distances[(point_i * gridDim.y) + center_i] = dist;
