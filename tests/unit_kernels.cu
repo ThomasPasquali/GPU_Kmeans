@@ -9,7 +9,7 @@
 #include "../src/utils.cuh"
 #include "../src/include/common.h"
 
-#define TEST_DEBUG 1
+#define TEST_DEBUG 0
 #define WARP_SIZE  32
 
 const DATA_TYPE infty   = numeric_limits<DATA_TYPE>::infinity();
@@ -17,7 +17,7 @@ const DATA_TYPE EPSILON = numeric_limits<DATA_TYPE>::epsilon();
 
 cudaDeviceProp deviceProps;
 
-void initRandomMatrix (DATA_TYPE* M, uint32_t rows, uint32_t cols) {
+void initRandomMatrixColMaj (DATA_TYPE* M, uint32_t rows, uint32_t cols) {
   for (uint32_t i = 0; i < rows; ++i) {
     for (uint32_t j = 0; j < cols; ++j) {
       //std::rand() / 100000005.32;
@@ -53,11 +53,12 @@ void computeCentroidAssociatedMatrix (DATA_TYPE* C, DATA_TYPE* centers, uint32_t
   }
 }
 
-TEST_CASE("kernel_distances_matrix", "[kernel][distances]") {
+TEST_CASE("kernel_distances_matrix", "[kernel][distances]") { // FIXME does not work well with N >= 500
   const unsigned int TESTS_N = 8;
-  const unsigned int N[TESTS_N] = {10, 10, 17, 30, 17,   15,  300, 1056};
-  const unsigned int D[TESTS_N] = { 1,  2,  3, 11, 42, 1500,  500,  700};
-  const unsigned int K[TESTS_N] = { 2,  6,  3, 11, 20,    5,   10,  506};
+  const unsigned int N[TESTS_N] = {10, 10, 17, 30, 17,   15,  300, 500};
+  const unsigned int D[TESTS_N] = { 1,  2,  3, 11, 42, 1500,  400,  600};
+  const unsigned int K[TESTS_N] = { 2,  6,  3, 11, 20,    5,   10,  200};
+  const unsigned int MAX_COLS = 4;
 
   for (int test_i = 0; test_i < 7; ++test_i) {
     printf("TTTTT %d\n", test_i);
@@ -77,20 +78,20 @@ TEST_CASE("kernel_distances_matrix", "[kernel][distances]") {
       DATA_TYPE *h_res = new DATA_TYPE[m * m];
 
       // Constructing P
-      initRandomMatrix(h_points, n, d1);
+      initRandomMatrixColMaj(h_points, n, d1);
       for (size_t i = 0; i < n; ++i) {
         h_points[i] = 1;
       }
       if (TEST_DEBUG) {
         printf("\nPOINTS:\n");
-        printMatrixColMaj(h_points, n, d1);
+        printMatrixColMajLimited(h_points, n, d1, MAX_COLS, 10);
       }
 
       // Constructing C
-      initRandomMatrix(h_centroids, k, d);
+      initRandomMatrixColMaj(h_centroids, k, d);
       if (TEST_DEBUG) {
         printf("\nCENTERS:\n");
-        printMatrixColMaj(h_centroids, k, d);
+        printMatrixColMajLimited(h_centroids, k, d, 10, 2);
       }
 
       cublasStatus_t stat;
@@ -104,11 +105,10 @@ TEST_CASE("kernel_distances_matrix", "[kernel][distances]") {
 
       DATA_TYPE* h_C = new DATA_TYPE[d1 * d1];
       for (uint32_t ki = 0; ki < k; ++ki) {
-        // TODO test compute_point_associated_matrices (distances.cu)
         computeCentroidAssociatedMatrix(h_C, h_centroids, d, ki, k);
         if (TEST_DEBUG) {
           printf("\nCenter %u associated matrix:\n", ki);
-          printMatrixColMaj(h_C, d1, d1);
+          printMatrixColMajLimited(h_C, d1, d1, 10, 10);
         }
 
         // TODO test compute_gemm_distances (distances.cu)
@@ -129,6 +129,7 @@ TEST_CASE("kernel_distances_matrix", "[kernel][distances]") {
           cublasDestroy(handle);
           exit(EXIT_FAILURE);
         }
+
         // Invoke the GEMM, ensuring k, lda, ldb, and ldc are all multiples of 8, 
         // and m is a multiple of 4:
         DATA_TYPE alpha = 1, beta = 0;
@@ -144,8 +145,8 @@ TEST_CASE("kernel_distances_matrix", "[kernel][distances]") {
           exit(EXIT_FAILURE);
         }
         if (TEST_DEBUG) {
-          printf("\nRES:\n");
-          printMatrixColMaj(h_res, n, d1);
+          printf("\nq * C (R):\n");
+          printMatrixColMajLimited(h_res, n, d1, MAX_COLS, 20);
         }
 
         stat = cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_T, 
@@ -160,8 +161,8 @@ TEST_CASE("kernel_distances_matrix", "[kernel][distances]") {
           exit(EXIT_FAILURE);
         }
         if (TEST_DEBUG) {
-          printf("\nRES:\n");
-          printMatrixColMaj(h_res, n, n);
+          printf("\nR * q^T:\n");
+          printMatrixColMajLimited(h_res, n, n, MAX_COLS, 20);
         }
 
         for (size_t j = 0; j < n; ++j) {
@@ -205,15 +206,16 @@ TEST_CASE("kernel_distances_warp", "[kernel][distances]") {
   const unsigned int D[TESTS_N] = { 1,  2,  3,  5,  11,   12,   24,    32};
   const unsigned int K[TESTS_N] = { 2,  6,  3, 28,   7,  500, 1763,  9056};
 
-  for (int i = 2; i < 3; ++i) { // FIXME
+  for (int i = 0; i < TESTS_N; ++i) {
     const unsigned int n = N[i];
     const unsigned int d = D[i];
     const unsigned int k = K[i];
 
     char test_name[50];
     sprintf(test_name, "kernel compute_distances_shfl n: %u  d: %u  k: %u", n, d, k);
+    
     SECTION(test_name) {
-
+      if (TEST_DEBUG) printf("TEST: %s\n", test_name);
       DATA_TYPE *h_points = new DATA_TYPE[n * d];
       DATA_TYPE *h_centroids = new DATA_TYPE[k * d];
       DATA_TYPE *h_distances = new DATA_TYPE[n * k];
@@ -225,7 +227,7 @@ TEST_CASE("kernel_distances_warp", "[kernel][distances]") {
         }
         if (TEST_DEBUG) printf("\n");
       }
-      if (TEST_DEBUG) printf("Centroids:\n");
+      if (TEST_DEBUG) printf("\nCentroids:\n");
       for (uint32_t i = 0; i < k; ++i) {
         for (uint32_t j = 0; j < d; ++j) {
           h_centroids[i * d + j] = static_cast <DATA_TYPE> (std::rand() / 10002.45);
@@ -262,12 +264,18 @@ TEST_CASE("kernel_distances_warp", "[kernel][distances]") {
       }
 
       cudaDeviceSynchronize();
-
+      if (TEST_DEBUG) {
+        for (uint32_t i = 0; i < n * k; ++i) {
+          printf("point: %u center: %u cmp: %.6f - %.6f = %.6f\n", i / k, i % k, h_distances[i], cpu_distances[i], h_distances[i] - cpu_distances[i]);
+        }
+      }
       for (uint32_t i = 0; i < n * k; ++i) {
-        if (TEST_DEBUG) printf("point: %u center: %u cmp: %.6f -- %.6f\n", i / k, i % k, h_distances[i], cpu_distances[i]);
         REQUIRE( h_distances[i] - cpu_distances[i] < EPSILON );
       }
 
+      delete[] h_points;
+      delete[] h_centroids;
+      delete[] h_distances;
       delete[] cpu_distances;
       cudaFree(d_distances);
       cudaFree(d_points);

@@ -50,11 +50,11 @@ __global__ void compute_distances_shfl(DATA_TYPE* distances, DATA_TYPE* centroid
   const uint32_t d_i = threadIdx.x % d_closest_2_pow;
 
   if (point_i < points_n && d_i < d) {
-    DATA_TYPE dist = fabs(points[point_i * d + d_i] - centroids[center_i * d + d_i]);
+    DATA_TYPE dist = points[point_i * d + d_i] - centroids[center_i * d + d_i];
     dist *= dist;
-    for (int i = d_closest_2_pow / 2; i > 0; i /= 2) {
+    for (int i = d_closest_2_pow / 4; i > 0; i /= 2) {
       dist += __shfl_down_sync(DISTANCES_SHFL_MASK, dist, i);
-      // if (point_i == 3) printf("%d  p: %lu c: %lu d: %u v: %.3f\n", i, point_i, center_i, d_i, dist);
+      // if (point_i == 1 && center_i == 2) printf("%d p: %u c: %u d: %u v: %.3f\n", i, point_i, center_i, d_i, dist);
     }
     if (d_i == 0) {
       distances[(point_i * gridDim.y) + center_i] = dist;
