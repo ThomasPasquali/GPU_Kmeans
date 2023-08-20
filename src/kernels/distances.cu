@@ -9,52 +9,51 @@
 
 /*** Warp oriented ***/
 
-__global__ void compute_distances_one_point_per_warp(DATA_TYPE* distances, DATA_TYPE* centroids, DATA_TYPE* points, uint32_t next_pow_2) {
+/**
+ * @brief This kernel will use exactly one warp to compute the distance between a point and a centroid thus is bounded to d <= 32. It uses shuffle to perform the reduction.
+ * 
+ * @param distances distances will be written here
+ * @param centroids 
+ * @param points 
+ * @param d_closest_2_pow passed as parameter to avoid useless computations
+ */
+__global__ void compute_distances_one_point_per_warp(DATA_TYPE* distances, const DATA_TYPE* centroids, const DATA_TYPE* points, const uint32_t d_closest_2_pow) {
   const uint64_t point_offset = blockIdx.x * blockDim.x + threadIdx.x;
   const uint64_t center_offset = blockIdx.y * blockDim.x + threadIdx.x;
+
   DATA_TYPE dist = points[point_offset] - centroids[center_offset];
   dist *= dist;
   
-  for (int i = next_pow_2; i > 0; i /= 2)
+  for (int i = (d_closest_2_pow >> 2); i > 0; i >>= 1) {
     dist += __shfl_down_sync(DISTANCES_SHFL_MASK, dist, i);
+  }
 
   if (threadIdx.x == 0) {
     distances[(blockIdx.x * gridDim.y) + blockIdx.y] = dist;
   }
 }
 
-__global__ void compute_distances_shmem(DATA_TYPE* distances, DATA_TYPE* centroids, DATA_TYPE* points, const uint32_t points_per_warp, const uint32_t d) {
-  const uint64_t point_i = (blockIdx.x * points_per_warp) + (threadIdx.x / d);
-  const uint64_t center_i = blockIdx.y;
-  const uint32_t d_i = threadIdx.x % d;
-  const uint64_t dists_i = (center_i * blockDim.y * d) + ((point_i % points_per_warp) * d) + d_i;
-
-  extern __shared__ DATA_TYPE dists[];
-
-  if (threadIdx.x < points_per_warp * d) {
-    DATA_TYPE dist = fabs(points[point_i * d + d_i] - centroids[center_i * d + d_i]);
-    dists[dists_i] = dist * dist;
-    __syncthreads();
-    if (d_i == 0) {
-      for (int i = 1; i < d; i++) {
-        dists[dists_i] += dists[dists_i + i];
-      }
-      distances[(point_i * center_i) + point_i] = dists[dists_i];
-    }
-  }
-}
-
-__global__ void compute_distances_shfl(DATA_TYPE* distances, DATA_TYPE* centroids, DATA_TYPE* points, const uint32_t points_n, const uint32_t points_per_warp, const uint32_t d, const uint32_t d_closest_2_pow) {
-  const uint32_t point_i = (blockIdx.x * points_per_warp) + (threadIdx.x / d_closest_2_pow);
+/**
+ * @brief This kernel fits as many points in one warp as possible, bounded to d <= 32. It uses shuffle to perform the reduction: similar to compute_distances_one_point_per_warp.
+ * 
+ * @param distances distances will be written here
+ * @param centroids 
+ * @param points 
+ * @param points_n 
+ * @param points_per_warp passed as parameter to avoid useless computations
+ * @param d 
+ * @param d_closest_2_pow_log2 passed as parameter to avoid useless computations
+ */
+__global__ void compute_distances_shfl(DATA_TYPE* distances, const DATA_TYPE* centroids, const DATA_TYPE* points, const uint32_t points_n, const uint32_t points_per_warp, const uint32_t d, const uint32_t d_closest_2_pow_log2) {
+  const uint32_t point_i = (blockIdx.x * points_per_warp) + (threadIdx.x >> d_closest_2_pow_log2);
   const uint32_t center_i = blockIdx.y;
-  const uint32_t d_i = threadIdx.x % d_closest_2_pow;
+  const uint32_t d_i = threadIdx.x & (d_closest_2_pow_log2 >> 1);
 
   if (point_i < points_n && d_i < d) {
-    DATA_TYPE dist = fabs(points[point_i * d + d_i] - centroids[center_i * d + d_i]);
+    DATA_TYPE dist = points[point_i * d + d_i] - centroids[center_i * d + d_i];
     dist *= dist;
-    for (int i = d_closest_2_pow / 2; i > 0; i /= 2) {
+    for (int i = (0b1 >> (d_closest_2_pow_log2 - 2)); i > 0; i >>= 1) {
       dist += __shfl_down_sync(DISTANCES_SHFL_MASK, dist, i);
-      // if (point_i == 3) printf("%d  p: %lu c: %lu d: %u v: %.3f\n", i, point_i, center_i, d_i, dist);
     }
     if (d_i == 0) {
       distances[(point_i * gridDim.y) + center_i] = dist;
@@ -64,10 +63,18 @@ __global__ void compute_distances_shfl(DATA_TYPE* distances, DATA_TYPE* centroid
 
 /*** END Warp oriented ***/
 
+
+
 /*** Matrix multiplication ***/
+
 /**
- * NOTICE: the reduction limits the maximum block size to 32 (warpSize) 
-*/
+ * @brief Computes the associated matrices for points (row-major) and stores them in associated_matrices (column-major for cuBlas). Note: this kernel will only write relevant values (i.e. on top, left and diagonal), the other values must be already be set to 0.
+ *
+ * @param points in ROW major order
+ * @param associated_matrices the associated matrices will be written here
+ * @param d 
+ * @param round to handle d > 32
+ */
 __global__ void compute_point_associated_matrices (const DATA_TYPE* points, DATA_TYPE* associated_matrices, const uint32_t d, const uint32_t round) {
   const uint32_t block_base = warpSize * round;
   const uint32_t p_i = blockIdx.x;
@@ -80,7 +87,7 @@ __global__ void compute_point_associated_matrices (const DATA_TYPE* points, DATA
   DATA_TYPE c = points[p_i * d + d_i];
   DATA_TYPE c_11 = c * c;
 
-  for (int i = warpSize / 2; i > 0; i /= 2) { // Reduce c_11
+  for (int i = warpSize >> 2; i > 0; i >>= 1) { // Reduce c_11
     c_11 += __shfl_down_sync(DISTANCES_SHFL_MASK, c_11, i);
   }
 
@@ -95,16 +102,17 @@ __global__ void compute_point_associated_matrices (const DATA_TYPE* points, DATA
 }
 
 DATA_TYPE* d_tmp = NULL; // https://docs.nvidia.com/cuda/cublas/index.html#cublas-t-gemm
+uint32_t d_tmp_dim = 0;
 /**
- * @brief Computes and writes to d_distances TODO
+ * @brief Computes and writes to d_distances the distance of each point-center (row-major, in this order)
  * 
  * @param handle 
  * @param d1 
  * @param n 
  * @param k 
- * @param d_P the points associated matrices
+ * @param d_P the points associated matrices (n * d1d1)
  * @param d_C the matrix of centers (prefixed with 1s)
- * @param d_distances 
+ * @param d_distances size: n * k
  */
 void compute_gemm_distances (cublasHandle_t& handle, uint32_t d1, uint32_t n, uint32_t k, DATA_TYPE* d_P, DATA_TYPE* d_C, DATA_TYPE* d_distances) {
   DATA_TYPE alpha = (DATA_TYPE)1;
@@ -114,8 +122,8 @@ void compute_gemm_distances (cublasHandle_t& handle, uint32_t d1, uint32_t n, ui
   uint32_t max_k_d1 = max(k, d1);
   DATA_TYPE h_distances[k * n];
   DATA_TYPE h_tmp[max_k_d1 * max_k_d1];
-  if (d_tmp == NULL) {
-    cudaMalloc(&d_tmp, max_k_d1 * max_k_d1 * sizeof(DATA_TYPE));
+  if (d_tmp_dim <= 0 || max_k_d1 != d_tmp_dim) {
+    CHECK_CUDA_ERROR(cudaMalloc(&d_tmp, max_k_d1 * max_k_d1 * sizeof(DATA_TYPE)));
   }
 
   for (uint32_t p_i = 0; p_i < n; ++p_i, P += d1d1) { // Iterate over points associated matrices
