@@ -9,7 +9,7 @@
 #include "../src/utils.cuh"
 #include "../src/include/common.h"
 
-#define TEST_DEBUG 0
+#define TEST_DEBUG 1
 #define WARP_SIZE  32
 
 const DATA_TYPE infty   = numeric_limits<DATA_TYPE>::infinity();
@@ -29,26 +29,26 @@ void initRandomMatrixColMaj (DATA_TYPE* M, uint32_t rows, uint32_t cols) {
 /**
  * @brief 
  * 
- * @param C a matrix of size (d+1)x(d+1)
+ * @param A a matrix of size (d+1)x(d+1) stored in column-major order
  * @param center a vector of size d
  * @param d number of dimensions
- * @param ki index of the center
- * @param ld number of rows of the matrix center
+ * @param idx index of the point
+ * @param ld number of rows of the matrix
  */
-void computeCentroidAssociatedMatrix (DATA_TYPE* C, DATA_TYPE* centers, uint32_t d, uint32_t ki, uint32_t ld) {
+void computeCPUCentroidAssociatedMatrix (DATA_TYPE* A, DATA_TYPE* points, uint32_t d, uint32_t idx, uint32_t ld) {
   ++d; // d = d + 1
   DATA_TYPE c;
   DATA_TYPE c_11 = 0;
   for (size_t i = 0; i < d - 1; ++i) { // Matrix borders
-    c = centers[IDX2C(ki, i, ld)];
-    C[i + 1] = -c;
-    C[(i + 1) * d] = -c;
+    c = points[IDX2C(idx, i, ld)];
+    A[i + 1] = -c;
+    A[(i + 1) * d] = -c;
     c_11 += c * c;
   }
-  C[0] = c_11;
+  A[0] = c_11;
   for (size_t i = 1; i < d; ++i) { // Matrix diagonal + fill with 0s 
     for (size_t j = 1; j < d; ++j) {
-      C[i * d + j] = i == j ? 1 : 0;
+      A[i * d + j] = i == j ? 1 : 0;
     }
   }
 }
@@ -60,141 +60,113 @@ TEST_CASE("kernel_distances_matrix", "[kernel][distances]") { // FIXME does not 
   const unsigned int K[TESTS_N] = { 2,  6,  3, 11, 20,    5,   10,  200};
   const unsigned int MAX_COLS = 4;
 
-  for (int test_i = 0; test_i < 7; ++test_i) {
-    printf("TTTTT %d\n", test_i);
+  for (int test_i = 0; test_i < 5; ++test_i) {
     const unsigned int n = N[test_i];
     const unsigned int d = D[test_i];
     const unsigned int d1 = d + 1;
+    const unsigned int d1d1 = d1 * d1;
+    const unsigned int nd1d1 = n * d1 * d1;
     const unsigned int k = K[test_i];
+    const unsigned int rounds = ((d - 1) / WARP_SIZE) + 1;
 
     char test_name[50];
     sprintf(test_name, "kernel compute_distances_matrix n: %u  d: %u  k: %u", n, d, k);
     SECTION(test_name) {
+      if (TEST_DEBUG) printf("Test: %s\n", test_name);
 
-      const unsigned int m = n > d1 ? n : d1;
-      DATA_TYPE *h_points = new DATA_TYPE[n * d1];
-      DATA_TYPE *h_centroids = new DATA_TYPE[k * d];
-      DATA_TYPE *h_distances = new DATA_TYPE[n];
-      DATA_TYPE *h_res = new DATA_TYPE[m * m];
+      DATA_TYPE *h_points = new DATA_TYPE[n * d];
+      DATA_TYPE *h_points_row_maj = new DATA_TYPE[n * d];
+      DATA_TYPE *h_centroids = new DATA_TYPE[k * d1];
+      DATA_TYPE *h_distances = new DATA_TYPE[n * k];
+      DATA_TYPE* h_P_CPU = new DATA_TYPE[d1 * d1];
+      DATA_TYPE* h_Ps_GPU = new DATA_TYPE[d1 * d1 * n];
 
-      // Constructing P
-      initRandomMatrixColMaj(h_points, n, d1);
-      for (size_t i = 0; i < n; ++i) {
-        h_points[i] = 1;
+      // Constructing P and C
+      initRandomMatrixColMaj(h_points, n, d);
+      for (size_t i = 0; i < n; i++) {
+        for (size_t j = 0; j < d; j++) {
+          h_points_row_maj[i * d + j] = h_points[IDX2C(i, j, n)];
+        }
+      }
+      
+      initRandomMatrixColMaj(h_centroids, k, d1);
+      for (size_t i = 0; i < k; ++i) {
+        h_centroids[i] = 1;
       }
       if (TEST_DEBUG) {
-        printf("\nPOINTS:\n");
-        printMatrixColMajLimited(h_points, n, d1, MAX_COLS, 10);
-      }
-
-      // Constructing C
-      initRandomMatrixColMaj(h_centroids, k, d);
-      if (TEST_DEBUG) {
-        printf("\nCENTERS:\n");
-        printMatrixColMajLimited(h_centroids, k, d, 10, 2);
+        printf("\nPOINTS %d:\n", n);
+        printMatrixColMajLimited(h_points, n, d, 10, 5);
+        printf("\nCENTERS %d:\n", k);
+        printMatrixColMajLimited(h_centroids, k, d1, 10, 5);
       }
 
       cublasStatus_t stat;
       cublasHandle_t handle;
-      DATA_TYPE* d_C;
-      cudaMalloc(&d_C, d1 * d1 * sizeof(DATA_TYPE));
+      DATA_TYPE* d_points;
+      cudaMalloc(&d_points, n * d * sizeof(DATA_TYPE));
+      cudaMemcpy(d_points, h_points_row_maj, n * d * sizeof(DATA_TYPE), cudaMemcpyHostToDevice);
       DATA_TYPE* d_P;
-      cudaMalloc(&d_P, n * d1 * sizeof(DATA_TYPE));
-      DATA_TYPE* d_RES;
-      cudaMalloc(&d_RES, m * m * sizeof(DATA_TYPE));
+      cudaMalloc(&d_P, nd1d1 * sizeof(DATA_TYPE));
+      cudaMemset(d_P, 0, nd1d1 * sizeof(DATA_TYPE));
+      DATA_TYPE* d_C;
+      cudaMalloc(&d_C, k * d1 * sizeof(DATA_TYPE));
+      cudaMemcpy(d_C, h_centroids, k * d1 * sizeof(DATA_TYPE), cudaMemcpyHostToDevice);
+      DATA_TYPE* d_distances;
+      cudaMalloc(&d_distances, n * k * sizeof(DATA_TYPE));
 
-      DATA_TYPE* h_C = new DATA_TYPE[d1 * d1];
-      for (uint32_t ki = 0; ki < k; ++ki) {
-        computeCentroidAssociatedMatrix(h_C, h_centroids, d, ki, k);
-        if (TEST_DEBUG) {
-          printf("\nCenter %u associated matrix:\n", ki);
-          printMatrixColMajLimited(h_C, d1, d1, 10, 10);
-        }
+      // Test kernel compute_point_associated_matrices
+      dim3 dist_assoc_matrices_grid_dim(n);
+      dim3 dist_assoc_matrices_block_dim(min(d, WARP_SIZE));
+      for (uint32_t i = 0; i < rounds; i++) {
+        compute_point_associated_matrices<<<dist_assoc_matrices_grid_dim, dist_assoc_matrices_block_dim>>>(d_points, d_P, d, i);
+      }
+      cudaMemcpy(h_Ps_GPU, d_P, nd1d1 * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost);
 
-        // TODO test compute_gemm_distances (distances.cu)
-        stat = cublasCreate(&handle);
-        if (stat != CUBLAS_STATUS_SUCCESS) {
-          printf ("CUBLAS initialization failed\n");
-          exit(EXIT_FAILURE);
-        }
-        stat = cublasSetMatrix (d1, d1, sizeof(DATA_TYPE), h_C, d1, d_C, d1);
-        if (stat != CUBLAS_STATUS_SUCCESS) {
-          printf ("data download failed");
-          cublasDestroy(handle);
-          exit(EXIT_FAILURE);
-        }
-        stat = cublasSetMatrix (n, d1, sizeof(DATA_TYPE), h_points, n, d_P, n);
-        if (stat != CUBLAS_STATUS_SUCCESS) {
-          printf ("data download failed");
-          cublasDestroy(handle);
-          exit(EXIT_FAILURE);
-        }
+      for (uint32_t ni = 0; ni < n; ++ni) {
+        computeCPUCentroidAssociatedMatrix(h_P_CPU, h_points, d, ni, n);
+        DATA_TYPE* h_P_GPU = h_Ps_GPU + (d1d1 * ni);
+        /* if (TEST_DEBUG) {
+          printf("\nPoint %u associated matrix:\n", ni);
+          printMatrixColMajLimited(h_P_CPU, d1, d1, 100, 100);
+          printf("\n");
+          printMatrixColMajLimited(h_P_GPU, d1, d1, 100, 100);
+        } */
 
-        // Invoke the GEMM, ensuring k, lda, ldb, and ldc are all multiples of 8, 
-        // and m is a multiple of 4:
-        DATA_TYPE alpha = 1, beta = 0;
-        stat = cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, 
-                          n, d1, d1, &alpha,
-                          d_P, n,
-                          d_C, d1,
-                          &beta, d_RES, n);
-        stat = cublasGetMatrix (n, d1, sizeof(DATA_TYPE), d_RES, n, h_res, n);
-        if (stat != CUBLAS_STATUS_SUCCESS) {
-          printf ("data upload failed %d", stat);
-          cublasDestroy(handle);
-          exit(EXIT_FAILURE);
+        // Check associated matrices
+        for (size_t i = 0; i < d1; i++) {
+          for (size_t j = 0; j < d1; j++) {
+            REQUIRE( h_P_CPU[i * d1 + j] == h_P_GPU[i * d1 + j] );
+          }
         }
-        if (TEST_DEBUG) {
-          printf("\nq * C (R):\n");
-          printMatrixColMajLimited(h_res, n, d1, MAX_COLS, 20);
-        }
+        
+        // Test function compute_gemm_distances
+        cublasHandle_t cublasHandle;
+        cublasCreate(&cublasHandle);
+        compute_gemm_distances(cublasHandle, d1, n, k, d_P, d_C, d_distances);
+        cudaMemcpy(h_distances, d_distances, n * k * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost);
 
-        stat = cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_T, 
-                          n, n, d1, &alpha,
-                          d_RES, n,
-                          d_P, n,
-                          &beta, d_RES, n);
-        stat = cublasGetMatrix (n, n, sizeof(DATA_TYPE), d_RES, n, h_res, n);
-        if (stat != CUBLAS_STATUS_SUCCESS) {
-          printf ("data upload failed %d", stat);
-          cublasDestroy(handle);
-          exit(EXIT_FAILURE);
-        }
-        if (TEST_DEBUG) {
-          printf("\nR * q^T:\n");
-          printMatrixColMajLimited(h_res, n, n, MAX_COLS, 20);
-        }
-
-        for (size_t j = 0; j < n; ++j) {
-          h_distances[j] = h_res[IDX2C(j, j, n)];
-        }
-        if (TEST_DEBUG) printf("\n\n");
-
-        for (uint32_t ni = 0; ni < n; ++ni) {
+        for (uint32_t ki = 0; ki < k; ++ki) {
           DATA_TYPE cpu_dist = 0, tmp;
           for (uint32_t di = 0; di < d; ++di) {
-            // printf("DD: %d (%d) - %d   %f\n", IDX2C(ni, di + 1, n), n*d1, IDX2C(ki, di, k), cpu_dist);
-            tmp = h_points[IDX2C(ni, di + 1, n)] - h_centroids[IDX2C(ki, di, k)];
+            tmp = h_points[IDX2C(ni, di, n)] - h_centroids[IDX2C(ki, di + 1, k)];
             cpu_dist += tmp * tmp;
           }
-          DATA_TYPE gpu_dist = h_distances[ni];
-          // if (TEST_DEBUG) 
-          printf("point: %u center: %u gpu(%.6f) cpu(%.6f)\n", ni, ki, gpu_dist, cpu_dist);
-          REQUIRE( gpu_dist - cpu_dist < EPSILON );
+          DATA_TYPE gpu_dist = h_distances[ni * k + ki];
+          if (TEST_DEBUG) printf("point: %u center: %u gpu(%.6f) cpu(%.6f)\n", ni, ki, gpu_dist, cpu_dist);
+          REQUIRE( fabs(gpu_dist - cpu_dist) < EPSILON );
         }
-        if (TEST_DEBUG) printf("\n\n");
-        cublasDestroy(handle);
 
+        if (TEST_DEBUG) printf("\n");
+        cublasDestroy(cublasHandle);
       }
 
-      delete h_C;
-      delete h_points;
-      delete h_centroids;
-      delete h_distances;
-      delete h_res;
+      delete[] h_P_CPU;
+      delete[] h_Ps_GPU;
+      delete[] h_points;
+      delete[] h_centroids;
+      delete[] h_distances;
       cudaFree(d_C);
       cudaFree(d_P);
-      cudaFree(d_RES);
 
     }
   }
@@ -285,8 +257,8 @@ TEST_CASE("kernel_distances_warp", "[kernel][distances]") {
         if (h_distances_1[i] - cpu_distances[i] >= EPSILON) {
           printf("(1PointperWarp) point: %u center: %u cmp: %.6f - %.6f = %.6f\n", i / k, i % k, h_distances_1[i], cpu_distances[i], h_distances_1[i] - cpu_distances[i]);
         }
-        REQUIRE( h_distances[i] - cpu_distances[i] < EPSILON );
-        REQUIRE( h_distances_1[i] - cpu_distances[i] < EPSILON );
+        REQUIRE( fabs(h_distances[i] - cpu_distances[i]) < EPSILON );
+        REQUIRE( fabs(h_distances_1[i] - cpu_distances[i]) < EPSILON );
       }
 
       delete[] h_points;

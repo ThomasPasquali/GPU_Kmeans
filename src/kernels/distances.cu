@@ -63,8 +63,18 @@ __global__ void compute_distances_shfl(DATA_TYPE* distances, const DATA_TYPE* ce
 
 /*** END Warp oriented ***/
 
+
+
 /*** Matrix multiplication ***/
 
+/**
+ * @brief Computes the associated matrices for points (row-major) and stores them in associated_matrices (column-major for cuBlas). Note: this kernel will only write relevant values (i.e. on top, left and diagonal), the other values must be already be set to 0.
+ *
+ * @param points in ROW major order
+ * @param associated_matrices the associated matrices will be written here
+ * @param d 
+ * @param round to handle d > 32
+ */
 __global__ void compute_point_associated_matrices (const DATA_TYPE* points, DATA_TYPE* associated_matrices, const uint32_t d, const uint32_t round) {
   const uint32_t block_base = warpSize * round;
   const uint32_t p_i = blockIdx.x;
@@ -77,7 +87,7 @@ __global__ void compute_point_associated_matrices (const DATA_TYPE* points, DATA
   DATA_TYPE c = points[p_i * d + d_i];
   DATA_TYPE c_11 = c * c;
 
-  for (int i = warpSize / 2; i > 0; i /= 2) { // Reduce c_11
+  for (int i = warpSize >> 2; i > 0; i >>= 1) { // Reduce c_11
     c_11 += __shfl_down_sync(DISTANCES_SHFL_MASK, c_11, i);
   }
 
@@ -92,16 +102,17 @@ __global__ void compute_point_associated_matrices (const DATA_TYPE* points, DATA
 }
 
 DATA_TYPE* d_tmp = NULL; // https://docs.nvidia.com/cuda/cublas/index.html#cublas-t-gemm
+uint32_t d_tmp_dim = 0;
 /**
- * @brief Computes and writes to d_distances TODO
+ * @brief Computes and writes to d_distances the distance of each point-center (row-major, in this order)
  * 
  * @param handle 
  * @param d1 
  * @param n 
  * @param k 
- * @param d_P the points associated matrices
+ * @param d_P the points associated matrices (n * d1d1)
  * @param d_C the matrix of centers (prefixed with 1s)
- * @param d_distances 
+ * @param d_distances size: n * k
  */
 void compute_gemm_distances (cublasHandle_t& handle, uint32_t d1, uint32_t n, uint32_t k, DATA_TYPE* d_P, DATA_TYPE* d_C, DATA_TYPE* d_distances) {
   DATA_TYPE alpha = (DATA_TYPE)1;
@@ -111,8 +122,8 @@ void compute_gemm_distances (cublasHandle_t& handle, uint32_t d1, uint32_t n, ui
   uint32_t max_k_d1 = max(k, d1);
   DATA_TYPE h_distances[k * n];
   DATA_TYPE h_tmp[max_k_d1 * max_k_d1];
-  if (d_tmp == NULL) {
-    cudaMalloc(&d_tmp, max_k_d1 * max_k_d1 * sizeof(DATA_TYPE));
+  if (d_tmp_dim <= 0 || max_k_d1 != d_tmp_dim) {
+    CHECK_CUDA_ERROR(cudaMalloc(&d_tmp, max_k_d1 * max_k_d1 * sizeof(DATA_TYPE)));
   }
 
   for (uint32_t p_i = 0; p_i < n; ++p_i, P += d1d1) { // Iterate over points associated matrices
