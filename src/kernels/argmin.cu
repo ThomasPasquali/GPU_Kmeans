@@ -79,10 +79,6 @@ void clusters_argmin_cub(const DATA_TYPE* d_distances, const uint32_t n, const u
     CHECK_CUDA_ERROR(cudaFree(d_argmin));
     CHECK_CUDA_ERROR(cudaDeviceSynchronize());
 
-    #if DEBUG_KERNEL_ARGMIN
-      printf(GREEN "Argmin point %lu: %d %.3f" RESET "\n", i, argmin_idx, argmin_val);
-    #endif
-
     ++h_clusters_len[argmin_idx];
     h_points_clusters[i] = argmin_idx;
   }
