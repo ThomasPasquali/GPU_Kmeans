@@ -370,16 +370,15 @@ uint64_t Kmeans::run (uint64_t maxiter) {
 }
 
 bool Kmeans::cmp_centroids () {
-  DATA_TYPE dist_sum = 0;
-  
   for (size_t i = 0; i < k; ++i) {
+    DATA_TYPE dist_sum = 0;
     for (size_t j = 0; j < d; ++j) {
       DATA_TYPE dist = h_centroids[i * d + j] - h_last_centroids[i * d + j];
       dist_sum += dist * dist;
     }
     if (sqrt(dist_sum) > EPSILON) { return false; }
   }
-
+  
   return true;
 }
 
