@@ -9,6 +9,7 @@ class Kmeans {
   private:
     const size_t n;
     const unsigned int d, k;
+    const float tol;
     const uint64_t POINTS_BYTES;
     const uint64_t CENTROIDS_BYTES;
     Point<DATA_TYPE>** points;
@@ -25,7 +26,7 @@ class Kmeans {
     bool cmp_centroids();
 
   public:
-    Kmeans(size_t n, unsigned int d, unsigned int k, Point<DATA_TYPE>** points);
+    Kmeans(size_t n, unsigned int d, unsigned int k, const float tol, Point<DATA_TYPE>** points);
     ~Kmeans();
     uint64_t run(uint64_t maxiter);
     void to_csv(ostream& o, char separator = ',');

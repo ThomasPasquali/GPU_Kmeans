@@ -5,7 +5,7 @@
 #include "include/point.hpp"
 
 /**
- * @brief 
+ * @brief
  * 0: compute_distances_one_point_per_warp
  * 1: compute_distances_shfl
  * 2: matrix multiplication
@@ -13,14 +13,14 @@
 #define COMPUTE_DISTANCES_KERNEL 1
 
 /**
- * @brief 
+ * @brief
  * 0: DeviceReduce::ArgMin
  * 1: clusters_argmin_shfl
  */
 #define ARGMIN_KERNEL 1
 
 /**
- * @brief 
+ * @brief
  * 0: compute_centroids_shfl
  * 1: compute_centroids_shfl_shrd
  */
@@ -30,6 +30,7 @@ class Kmeans {
   private:
     const size_t n;
     const unsigned int d, k;
+    const float tol;
     const uint64_t POINTS_BYTES;
     uint64_t CENTROIDS_BYTES;
     Point<DATA_TYPE>** points;
@@ -51,13 +52,13 @@ class Kmeans {
     bool cmp_centroids();
 
   public:
-    Kmeans(size_t n, unsigned int d, unsigned int k, Point<DATA_TYPE>** points, cudaDeviceProp* deviceProps);
+    Kmeans(size_t n, unsigned int d, unsigned int k, float tol, Point<DATA_TYPE>** points, cudaDeviceProp* deviceProps);
     ~Kmeans();
-    
+
     /**
-     * @brief 
+     * @brief
      * Notice: once finished will set clusters on each of Point<DATA_TYPE> of points passed in contructor
-     * @param maxiter 
+     * @param maxiter
      * @return iter at which k-means converged
      * @return maxiter if did not converge
      */

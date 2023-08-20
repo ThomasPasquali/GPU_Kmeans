@@ -21,7 +21,6 @@ seed_seq seed{0}; // FIXME use rd()
 mt19937 rng(seed);
 
 const DATA_TYPE INFNTY  = numeric_limits<DATA_TYPE>::infinity();
-const DATA_TYPE EPSILON = numeric_limits<DATA_TYPE>::epsilon();
 
 /* Kmeans class */
 void Kmeans::init_centroids (Point<DATA_TYPE>** points) {
@@ -54,8 +53,8 @@ void Kmeans::init_centroids (Point<DATA_TYPE>** points) {
   }
 
   #if DEBUG_INIT_CENTROIDS
-    cout << endl << "Centroids" << endl; 
-    for (i = 0; i < k; ++i) 
+    cout << endl << "Centroids" << endl;
+    for (i = 0; i < k; ++i)
       cout << *(centroids[i]) << endl;
   #endif
 
@@ -74,8 +73,8 @@ void Kmeans::init_centroids (Point<DATA_TYPE>** points) {
   CHECK_CUDA_ERROR(cudaMalloc(&d_centroids, CENTROIDS_BYTES));
 }
 
-Kmeans::Kmeans (size_t _n, unsigned int _d, unsigned int _k, Point<DATA_TYPE>** _points, cudaDeviceProp* _deviceProps)
-    : n(_n), d(_d), k(_k),
+Kmeans::Kmeans (size_t _n, unsigned int _d, unsigned int _k, float _tol, Point<DATA_TYPE>** _points, cudaDeviceProp* _deviceProps)
+    : n(_n), d(_d), k(_k), tol(_tol),
     POINTS_BYTES(_n * _d * sizeof(DATA_TYPE)),
     CENTROIDS_BYTES(_k * _d * sizeof(DATA_TYPE)),
     points(_points),
@@ -91,7 +90,6 @@ Kmeans::Kmeans (size_t _n, unsigned int _d, unsigned int _k, Point<DATA_TYPE>** 
   CHECK_CUDA_ERROR(cudaMemcpy(d_points, h_points, POINTS_BYTES, cudaMemcpyHostToDevice));
 
   init_centroids(_points);
-  cudaDeviceSynchronize(); // FIXME?
 }
 
 Kmeans::~Kmeans () {
@@ -151,14 +149,14 @@ uint64_t Kmeans::run (uint64_t maxiter) {
   dim3 argmin_grid_dim, argmin_block_dim;
   uint32_t argmin_warps_per_block, argmin_sh_mem;
   schedule_argmin_kernel(deviceProps, n, k, &argmin_grid_dim, &argmin_block_dim, &argmin_warps_per_block, &argmin_sh_mem);
-  
+
   dim3 cent_grid_dim, cent_block_dim;
   schedule_centroids_kernel(deviceProps, n, d, k, &cent_grid_dim, &cent_block_dim);
 
   /* MAIN LOOP */
   while (iter++ < maxiter) {
     /* COMPUTE DISTANCES */
-    
+
     #if COMPUTE_DISTANCES_KERNEL >= 2
       if (DEBUG_KERNELS_INVOKATION) printf(YELLOW "[KERNEL]" RESET " Matmul\n");
     #else
@@ -225,20 +223,20 @@ uint64_t Kmeans::run (uint64_t maxiter) {
     #endif
 
     ////////////////////////////////////////* ASSIGN POINTS TO NEW CLUSTERS */////////////////////////////////////////
-    
+
     #if PERFORMANCES_KERNEL_ARGMIN
       cudaEvent_t e_perf_argmin_start, e_perf_argmin_stop;
       cudaEventCreate(&e_perf_argmin_start);
       cudaEventCreate(&e_perf_argmin_stop);
       cudaEventRecord(e_perf_argmin_start);
     #endif
-    
+
     if (DEBUG_KERNELS_INVOKATION) printf(YELLOW "[KERNEL]" RESET " %-25s: Grid (%4u, %4u, %4u), Block (%4u, %4u, %4u), Sh.mem. %uB\n", "clusters_argmin_shfl", argmin_grid_dim.x, argmin_grid_dim.y, argmin_grid_dim.z, argmin_block_dim.x, argmin_block_dim.y, argmin_block_dim.z, argmin_sh_mem);
-    
+
     CHECK_CUDA_ERROR(cudaMemset(d_clusters_len, 0, k * sizeof(uint32_t)));
     clusters_argmin_shfl<<<argmin_grid_dim, argmin_block_dim, argmin_sh_mem>>>(n, k, d_distances, d_points_clusters, d_clusters_len, argmin_warps_per_block, INFNTY);
-    CHECK_CUDA_ERROR(cudaDeviceSynchronize()); 
-    
+    CHECK_CUDA_ERROR(cudaDeviceSynchronize());
+
     #if PERFORMANCES_KERNEL_ARGMIN
       cudaEventRecord(e_perf_argmin_stop);
       cudaEventSynchronize(e_perf_argmin_stop);
@@ -248,7 +246,7 @@ uint64_t Kmeans::run (uint64_t maxiter) {
       cudaEventDestroy(e_perf_argmin_stop);
       cudaEventDestroy(e_perf_argmin_start);
     #endif
-    
+
     #if DEBUG_KERNEL_ARGMIN
       printf(GREEN "[DEBUG_KERNEL_ARGMIN]\n" RESET);
       uint32_t tmp1[n];
@@ -260,7 +258,7 @@ uint64_t Kmeans::run (uint64_t maxiter) {
     #endif
 
     ///////////////////////////////////////////* COMPUTE NEW CENTROIDS *///////////////////////////////////////////
-    
+
     CHECK_CUDA_ERROR(cudaMemset(h_centroids, 0, k * d * sizeof(DATA_TYPE)));
     CHECK_CUDA_ERROR(cudaMemset(d_centroids, 0, k * d * sizeof(DATA_TYPE)));
 
@@ -276,7 +274,7 @@ uint64_t Kmeans::run (uint64_t maxiter) {
     for (uint32_t i = 0; i < rounds; i++) {
       compute_centroids_shfl<<<cent_grid_dim, cent_block_dim>>>(d_centroids, d_points, d_points_clusters, d_clusters_len, n, d, k, i);
     }
-    CHECK_CUDA_ERROR(cudaDeviceSynchronize()); 
+    CHECK_CUDA_ERROR(cudaDeviceSynchronize());
 
     #if PERFORMANCES_KERNEL_CENTROIDS
       cudaEventRecord(e_perf_cent_stop);
@@ -297,14 +295,14 @@ uint64_t Kmeans::run (uint64_t maxiter) {
         for (uint32_t j = 0; j < d; ++j) {
           h_centroids[h_points_clusters[i] * d + j] += h_points[i * d + j];
         }
-      } 
+      }
       for (uint32_t i = 0; i < k; ++i) {
         for (uint32_t j = 0; j < d; ++j) {
-          uint64_t count = h_clusters_len[i] > 1 ? h_clusters_len[i] : 1; 
-          DATA_TYPE scale = 1.0 / ((double) count); 
-          h_centroids[i * d + j] *= scale;    
+          uint64_t count = h_clusters_len[i] > 1 ? h_clusters_len[i] : 1;
+          DATA_TYPE scale = 1.0 / ((double) count);
+          h_centroids[i * d + j] *= scale;
         }
-      } 
+      }
       cout << GREEN "[DEBUG_KERNEL_CENTROIDS]" << endl;
       cout << endl << "CENTROIDS (CPU)" << endl;
       for (uint32_t i = 0; i < k; ++i) {
@@ -312,7 +310,7 @@ uint64_t Kmeans::run (uint64_t maxiter) {
           printf("%.3f, ", h_centroids[i * d + j]);
         cout << endl;
       }
-      CHECK_CUDA_ERROR(cudaMemset(h_centroids, 0, d * k * sizeof(DATA_TYPE)));     
+      CHECK_CUDA_ERROR(cudaMemset(h_centroids, 0, d * k * sizeof(DATA_TYPE)));
       CHECK_CUDA_ERROR(cudaMemcpy(h_centroids, d_centroids, d * k * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost));
       cout << endl << "CENTROIDS (GPU)" << endl;
       for (uint32_t i = 0; i < k; ++i) {
@@ -327,15 +325,15 @@ uint64_t Kmeans::run (uint64_t maxiter) {
     CHECK_CUDA_ERROR(cudaMemcpy(h_centroids, d_centroids, d * k * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost));
 
     /////////////////////////////////////////////* CHECK IF CONVERGED */////////////////////////////////////////////
-    
+
     // Check exit
-    if (iter > 1 && cmp_centroids()) { 
-      converged = iter; 
-      break; 
+    if (iter > 1 && cmp_centroids()) {
+      converged = iter;
+      break;
     }
-    
+
     // Copy current centroids
-    memcpy(h_last_centroids, h_centroids, CENTROIDS_BYTES); 
+    memcpy(h_last_centroids, h_centroids, CENTROIDS_BYTES);
 
     #if COMPUTE_DISTANCES_KERNEL >= 2
       /* UPDATE h_centroids_matrix */
@@ -346,7 +344,7 @@ uint64_t Kmeans::run (uint64_t maxiter) {
         }
       }
     #endif
-    
+
   }
   /* MAIN LOOP END */
 
@@ -355,7 +353,7 @@ uint64_t Kmeans::run (uint64_t maxiter) {
   for (size_t i = 0; i < n; i++) {
     points[i]->setCluster(h_points_clusters[i]);
   }
-  
+
   /* FREE MEMORY */
   CHECK_CUDA_ERROR(cudaFree(d_distances));
   CHECK_CUDA_ERROR(cudaFree(d_points_clusters));
@@ -376,9 +374,9 @@ bool Kmeans::cmp_centroids () {
       DATA_TYPE dist = h_centroids[i * d + j] - h_last_centroids[i * d + j];
       dist_sum += dist * dist;
     }
-    if (sqrt(dist_sum) > EPSILON) { return false; }
+    if (sqrt(dist_sum) > tol) { return false; }
   }
-  
+
   return true;
 }
 

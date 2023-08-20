@@ -17,21 +17,20 @@ seed_seq seed{0};
 mt19937 rng(seed);
 
 const DATA_TYPE INFNTY  = numeric_limits<DATA_TYPE>::infinity();
-const DATA_TYPE EPSILON = numeric_limits<DATA_TYPE>::epsilon();
 
-Kmeans::Kmeans (size_t _n, unsigned int _d, unsigned int _k, Point<DATA_TYPE>** _points) : 
-  n(_n), d(_d), k(_k),
+Kmeans::Kmeans (size_t _n, unsigned int _d, unsigned int _k, const float _tol, Point<DATA_TYPE>** _points) :
+  n(_n), d(_d), k(_k), tol(_tol),
   POINTS_BYTES(_n * _d * sizeof(DATA_TYPE)),
   CENTROIDS_BYTES(_k * _d * sizeof(DATA_TYPE)),
   points(_points) {
-  
+
   h_points = new DATA_TYPE[POINTS_BYTES];
   for (size_t i = 0; i < n; ++i) {
     for (size_t j = 0; j < d; ++j) {
       h_points[i * d + j] = _points[i]->get(j);
     }
   }
-  
+
   init_centroids();
 }
 
@@ -48,7 +47,7 @@ void Kmeans::init_centroids () {
 
   h_centroids = new DATA_TYPE[CENTROIDS_BYTES];
   h_last_centroids = new DATA_TYPE[CENTROIDS_BYTES];
-  
+
   unsigned int i = 0;
   vector<Point<DATA_TYPE>*> usedPoints;
   Point<DATA_TYPE>* centroids[k];
@@ -56,7 +55,7 @@ void Kmeans::init_centroids () {
     Point<DATA_TYPE>* p = points[random_int(rng)];
     bool found = false;
     for (auto p1 : usedPoints) {
-      if ((*p1) == (*p)) { 
+      if ((*p1) == (*p)) {
         found = true;
         break;
       }
@@ -68,8 +67,8 @@ void Kmeans::init_centroids () {
     }
   }
 
-  cout << endl << "Centroids" << endl; 
-  for (i = 0; i < k; ++i) 
+  cout << endl << "Centroids" << endl;
+  for (i = 0; i < k; ++i)
     cout << *(centroids[i]) << endl;
 
   for (size_t i = 0; i < k; ++i) {
@@ -116,7 +115,7 @@ void Kmeans::clusters_argmin(const DATA_TYPE *distances, uint32_t *points_cluste
 
   if (DEBUG) {
     printf("\nARGMIN DEBUG\n");
-    for (uint32_t i = 0; i < n; ++i) 
+    for (uint32_t i = 0; i < n; ++i)
       printf("N=%-2u K=%-2u \n", i, points_clusters[i]);
     printf("\n");
     for (uint32_t i = 0; i < k; ++i)
@@ -130,15 +129,15 @@ void Kmeans::compute_centroids(const uint32_t *clusters_len) {
     for (uint32_t j = 0; j < d; ++j) {
       h_centroids[points_clusters[i] * d + j] += h_points[i * d + j];
     }
-  } 
+  }
 
   for (uint32_t i = 0; i < k; ++i) {
     for (uint32_t j = 0; j < d; ++j) {
-      uint32_t count = clusters_len[i] > 1 ? clusters_len[i] : 1; 
-      DATA_TYPE scale = 1.0 / ((double) count); 
-      h_centroids[i * d + j] *= scale;    
+      uint32_t count = clusters_len[i] > 1 ? clusters_len[i] : 1;
+      DATA_TYPE scale = 1.0 / ((double) count);
+      h_centroids[i * d + j] *= scale;
     }
-  } 
+  }
 
   if (DEBUG) {
     printf("\nCENTROIDS DEBUG\n");
@@ -147,7 +146,7 @@ void Kmeans::compute_centroids(const uint32_t *clusters_len) {
         printf("%.3f, ", h_centroids[i * d + j]);
       printf("\n");
     }
-  }  
+  }
 }
 
 uint64_t Kmeans::run (uint64_t maxiter) {
@@ -161,16 +160,14 @@ uint64_t Kmeans::run (uint64_t maxiter) {
   while (iter++ < maxiter) {
     compute_distances(distances);
     clusters_argmin(distances, points_clusters, clusters_len);
-    compute_centroids(clusters_len);   
+    compute_centroids(clusters_len);
 
-
-    
-    if (iter > 1 && cmp_centroids()) { 
-      converged = iter; 
-      break; 
+    if (iter > 1 && cmp_centroids()) {
+      converged = iter;
+      break;
     }
-    
-    memcpy(h_last_centroids, h_centroids, CENTROIDS_BYTES); 
+
+    memcpy(h_last_centroids, h_centroids, CENTROIDS_BYTES);
   }
   /* MAIN LOOP END */
 
@@ -185,14 +182,14 @@ uint64_t Kmeans::run (uint64_t maxiter) {
   return converged;
 }
 
-bool Kmeans::cmp_centroids () {  
+bool Kmeans::cmp_centroids () {
   for (size_t i = 0; i < k; ++i) {
     DATA_TYPE dist_sum = 0;
     for (size_t j = 0; j < d; ++j) {
       DATA_TYPE dist = h_centroids[i * d + j] - h_last_centroids[i * d + j];
       dist_sum += dist * dist;
     }
-    if (sqrt(dist_sum) > EPSILON) { return false; }
+    if (sqrt(dist_sum) > tol) { return false; }
   }
   return true;
 }
