@@ -130,10 +130,11 @@ void printMatrixColMajLimited (DATA_TYPE* M, uint32_t rows, uint32_t cols, uint3
   const uint32_t r = min(rows, max_rows);
   for (uint32_t i = 0; i < r; ++i) {
     for (uint32_t j = 0; j < c; ++j) {
-      printf("%10.3f ", M[IDX2C(i, j, rows)]);
+      printf("%8.3f ", M[IDX2C(i, j, rows)]);
     }
-    printf("\n");
+    printf(cols > max_cols ? "      ...\n" : "\n");
   }
+  if (rows > max_rows) printf("     ... %d more rows ...\n", rows - max_rows);
 }
 
 void printMatrixRowMajLimited (DATA_TYPE* M, uint32_t rows, uint32_t cols, uint32_t max_cols, uint32_t max_rows) {
@@ -141,10 +142,11 @@ void printMatrixRowMajLimited (DATA_TYPE* M, uint32_t rows, uint32_t cols, uint3
   const uint32_t r = min(cols, max_rows);
   for (uint32_t i = 0; i < r; ++i) {
     for (uint32_t j = 0; j < c; ++j) {
-      printf("%10.3f ", M[i * cols + j]);
+      printf("%8.3f ", M[i * cols + j]);
     }
-    printf("\n");
+    printf(cols > max_cols ? "      ...\n" : "\n");
   }
+  if (rows > max_rows) printf("     ... %d more rows ...\n", rows - max_rows);
 }
 
 void printArray (DATA_TYPE* A, uint32_t len) {

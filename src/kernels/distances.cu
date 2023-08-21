@@ -24,7 +24,7 @@ __global__ void compute_distances_one_point_per_warp(DATA_TYPE* distances, const
   DATA_TYPE dist = points[point_offset] - centroids[center_offset];
   dist *= dist;
   
-  for (int i = (d_closest_2_pow >> 2); i > 0; i >>= 1) {
+  for (int i = (d_closest_2_pow >> 1); i > 0; i >>= 1) {
     dist += __shfl_down_sync(DISTANCES_SHFL_MASK, dist, i);
   }
 
@@ -45,16 +45,18 @@ __global__ void compute_distances_one_point_per_warp(DATA_TYPE* distances, const
  * @param d_closest_2_pow_log2 passed as parameter to avoid useless computations
  */
 __global__ void compute_distances_shfl(DATA_TYPE* distances, const DATA_TYPE* centroids, const DATA_TYPE* points, const uint32_t points_n, const uint32_t points_per_warp, const uint32_t d, const uint32_t d_closest_2_pow_log2) {
-  const uint32_t point_i = (blockIdx.x * points_per_warp) + (threadIdx.x >> d_closest_2_pow_log2);
+  const uint32_t point_i = (blockIdx.x * points_per_warp) + (threadIdx.x >> (d_closest_2_pow_log2));
   const uint32_t center_i = blockIdx.y;
-  const uint32_t d_i = threadIdx.x & (d_closest_2_pow_log2 >> 1);
+  const uint32_t d_i = threadIdx.x & ((0b1 << d_closest_2_pow_log2) - 1);
 
   if (point_i < points_n && d_i < d) {
     DATA_TYPE dist = points[point_i * d + d_i] - centroids[center_i * d + d_i];
     dist *= dist;
-    for (int i = (0b1 >> (d_closest_2_pow_log2 - 2)); i > 0; i >>= 1) {
+
+    for (int i = (0b1 << (d_closest_2_pow_log2 - 1)); i > 0; i >>= 1) {      
       dist += __shfl_down_sync(DISTANCES_SHFL_MASK, dist, i);
     }
+    
     if (d_i == 0) {
       distances[(point_i * gridDim.y) + center_i] = dist;
     }

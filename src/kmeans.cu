@@ -124,7 +124,7 @@ uint64_t Kmeans::run (uint64_t maxiter) {
     dim3 dist_block_dim(d);
     uint32_t dist_kernel_sh_mem = 0;
   #elif COMPUTE_DISTANCES_KERNEL == 1
-    const uint32_t dist_max_points_per_warp = deviceProps->warpSize / next_pow_2(d); // FIXME k > 32
+    const uint32_t dist_max_points_per_warp = deviceProps->warpSize / next_pow_2(d); // Does not work for d > 32
     dim3 dist_grid_dim(ceil(((float) n) / dist_max_points_per_warp), k);
     dim3 dist_block_dim(dist_max_points_per_warp * next_pow_2(d));
     uint32_t dist_kernel_sh_mem = 0;
@@ -171,7 +171,7 @@ uint64_t Kmeans::run (uint64_t maxiter) {
     #if COMPUTE_DISTANCES_KERNEL == 0
       compute_distances_one_point_per_warp<<<dist_grid_dim, dist_block_dim>>>(d_distances, d_centroids, d_points, next_pow_2(d));
     #elif COMPUTE_DISTANCES_KERNEL == 1
-      compute_distances_shfl<<<dist_grid_dim, dist_block_dim>>>(d_distances, d_centroids, d_points, n, dist_max_points_per_warp, d, log2(next_pow_2(d)));
+      compute_distances_shfl<<<dist_grid_dim, dist_block_dim>>>(d_distances, d_centroids, d_points, n, dist_max_points_per_warp, d, log2(next_pow_2(d)) > 0 ? log2(next_pow_2(d)) : 1);
     #else
       CHECK_CUBLAS_ERROR(cublasSetMatrix(k, d1, sizeof(DATA_TYPE), h_centroids_matrix, k, d_centroids_matrix, k)); // same as CHECK_CUDA_ERROR(cudaMemcpy(d_centroids_matrix, h_centroids_matrix, CENTROIDS_BYTES, cudaMemcpyHostToDevice));
       compute_gemm_distances(cublasHandle, d1, n, k, d_points_assoc_matrices, d_centroids_matrix, d_distances);

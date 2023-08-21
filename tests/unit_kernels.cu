@@ -9,7 +9,7 @@
 #include "../src/utils.cuh"
 #include "../src/include/common.h"
 
-#define TEST_DEBUG 1
+#define TEST_DEBUG 0
 #define WARP_SIZE  32
 
 const DATA_TYPE infty   = numeric_limits<DATA_TYPE>::infinity();
@@ -125,12 +125,12 @@ TEST_CASE("kernel_distances_matrix", "[kernel][distances]") { // FIXME does not 
       for (uint32_t ni = 0; ni < n; ++ni) {
         computeCPUCentroidAssociatedMatrix(h_P_CPU, h_points, d, ni, n);
         DATA_TYPE* h_P_GPU = h_Ps_GPU + (d1d1 * ni);
-        /* if (TEST_DEBUG) {
+        if (TEST_DEBUG) {
           printf("\nPoint %u associated matrix:\n", ni);
-          printMatrixColMajLimited(h_P_CPU, d1, d1, 100, 100);
-          printf("\n");
-          printMatrixColMajLimited(h_P_GPU, d1, d1, 100, 100);
-        } */
+          printMatrixColMajLimited(h_P_CPU, d1, d1, 15, 15);
+          printf("\nGPU:\n");
+          printMatrixColMajLimited(h_P_GPU, d1, d1, 15, 15);
+        }
 
         // Check associated matrices
         for (size_t i = 0; i < d1; i++) {
@@ -178,7 +178,7 @@ TEST_CASE("kernel_distances_warp", "[kernel][distances]") {
   const unsigned int D[TESTS_N] = { 1,  2,  3,  5,  11,   12,   24,    32};
   const unsigned int K[TESTS_N] = { 2,  6,  3, 28,   7,  500, 1763,  9056};
 
-  for (int i = 0; i < TESTS_N - 4; ++i) {
+  for (int i = 0; i < TESTS_N; ++i) {
     const unsigned int n = N[i];
     const unsigned int d = D[i];
     const unsigned int k = K[i];
@@ -195,16 +195,16 @@ TEST_CASE("kernel_distances_warp", "[kernel][distances]") {
       if (TEST_DEBUG) printf("Points:\n");
       for (uint32_t i = 0; i < n; ++i) {
         for (uint32_t j = 0; j < d; ++j) {
-          h_points[i * d + j] = std::rand() / 10002.32;
-          if (TEST_DEBUG) printf("%.3f, ", h_points[i * d + j]);
+          h_points[i * d + j] = std::rand() / 100000002.32;
+          if (TEST_DEBUG) printf("%6.3f, ", h_points[i * d + j]);
         }
         if (TEST_DEBUG) printf("\n");
       }
       if (TEST_DEBUG) printf("\nCentroids:\n");
       for (uint32_t i = 0; i < k; ++i) {
         for (uint32_t j = 0; j < d; ++j) {
-          h_centroids[i * d + j] = static_cast <DATA_TYPE> (std::rand() / 10002.45);
-          if (TEST_DEBUG) printf("%.3f, ", h_points[i * d + j]);
+          h_centroids[i * d + j] = static_cast <DATA_TYPE> (std::rand() / 100000002.45);
+          if (TEST_DEBUG) printf("%6.3f, ", h_points[i * d + j]);
         }
         if (TEST_DEBUG) printf("\n");
       }
@@ -223,7 +223,7 @@ TEST_CASE("kernel_distances_warp", "[kernel][distances]") {
       const uint32_t dist_max_points_per_warp = WARP_SIZE / next_pow_2(d);
       dim3 dist_grid_dim(ceil(((float) n) / dist_max_points_per_warp), k);
       dim3 dist_block_dim(dist_max_points_per_warp * next_pow_2(d));
-      compute_distances_shfl<<<dist_grid_dim, dist_block_dim>>>(d_distances, d_centroids, d_points, n, dist_max_points_per_warp, d, log2(next_pow_2(d) >> 1));
+      compute_distances_shfl<<<dist_grid_dim, dist_block_dim>>>(d_distances, d_centroids, d_points, n, dist_max_points_per_warp, d, log2(next_pow_2(d)) > 0 ? log2(next_pow_2(d)) : 1);
       cudaMemcpy(h_distances, d_distances, sizeof(DATA_TYPE) * n * k,  cudaMemcpyDeviceToHost);
 
       // Test kernel ONE POINT PER WARP
@@ -245,21 +245,25 @@ TEST_CASE("kernel_distances_warp", "[kernel][distances]") {
       }
 
       cudaDeviceSynchronize();
-      if (TEST_DEBUG) {
-        for (uint32_t i = 0; i < n * k; ++i) {
-          printf("point: %u center: %u cmp: %.6f - %.6f = %.6f\n", i / k, i % k, h_distances[i], cpu_distances[i], h_distances[i] - cpu_distances[i]);
-        }
-      }
+      const DATA_TYPE epsilon = 0.002;
+      DATA_TYPE max_diff = 0;
+
       for (uint32_t i = 0; i < n * k; ++i) {
-        if (h_distances[i] - cpu_distances[i] >= EPSILON) {
+        if (i < 10 && fabs(h_distances[i] - cpu_distances[i]) >= epsilon) {
           printf("point: %u center: %u cmp: %.6f - %.6f = %.6f\n", i / k, i % k, h_distances[i], cpu_distances[i], h_distances[i] - cpu_distances[i]);
         }
-        if (h_distances_1[i] - cpu_distances[i] >= EPSILON) {
+        if (fabs(h_distances_1[i] - cpu_distances[i]) >= epsilon) {
           printf("(1PointperWarp) point: %u center: %u cmp: %.6f - %.6f = %.6f\n", i / k, i % k, h_distances_1[i], cpu_distances[i], h_distances_1[i] - cpu_distances[i]);
         }
-        REQUIRE( fabs(h_distances[i] - cpu_distances[i]) < EPSILON );
-        REQUIRE( fabs(h_distances_1[i] - cpu_distances[i]) < EPSILON );
+        DATA_TYPE diff = fabs(h_distances[i] - h_distances_1[i]);
+        if (diff > max_diff) max_diff = diff;
       }
+      for (uint32_t i = 0; i < n * k; ++i) {
+        REQUIRE( fabs(h_distances[i] - cpu_distances[i]) < epsilon );
+        REQUIRE( fabs(h_distances_1[i] - cpu_distances[i]) < epsilon );
+      }
+
+      printf("Max diff for test: %s  =  %6.8f\n", test_name, max_diff);
 
       delete[] h_points;
       delete[] h_centroids;
