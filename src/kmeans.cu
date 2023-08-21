@@ -153,6 +153,8 @@ uint64_t Kmeans::run (uint64_t maxiter) {
   dim3 cent_grid_dim, cent_block_dim;
   schedule_centroids_kernel(deviceProps, n, d, k, &cent_grid_dim, &cent_block_dim);
 
+  CHECK_CUDA_ERROR(cudaMemcpy(d_centroids, h_centroids, d * k * sizeof(DATA_TYPE), cudaMemcpyHostToDevice));
+
   /* MAIN LOOP */
   while (iter++ < maxiter) {
     /* COMPUTE DISTANCES */
@@ -216,7 +218,7 @@ uint64_t Kmeans::run (uint64_t maxiter) {
       CHECK_CUDA_ERROR(cudaMemcpy(tmp_dist, d_distances, n * k * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost));
       for (uint32_t i = 0; i < n; ++i)
         for (uint32_t j = 0; j < k; ++j)
-          printf("N=%-2u K=%-2u -> GPU=%.3f CPU=%.3f %d\n", i, j, tmp_dist[i * k + j], cpu_distances[i * k + j], tmp_dist[i * k + j] == cpu_distances[i * k + j]);
+          if (fabs(tmp_dist[i * k + j] - cpu_distances[i * k + j]) > 0.001) printf("N=%-2u K=%-2u -> GPU=%.4f CPU=%.4f diff: %.8f\n", i, j, tmp_dist[i * k + j], cpu_distances[i * k + j], fabs(tmp_dist[i * k + j] - cpu_distances[i * k + j]));
       cout << RESET << endl;
       delete[] cpu_distances;
       delete[] tmp_dist;

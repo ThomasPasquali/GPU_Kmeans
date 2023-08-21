@@ -173,10 +173,10 @@ TEST_CASE("kernel_distances_matrix", "[kernel][distances]") { // FIXME does not 
 }
 
 TEST_CASE("kernel_distances_warp", "[kernel][distances]") {
-  const unsigned int TESTS_N = 8;
-  const unsigned int N[TESTS_N] = {10, 10, 17, 51, 159, 1000, 3456, 10056};
-  const unsigned int D[TESTS_N] = { 1,  2,  3,  5,  11,   12,   24,    32};
-  const unsigned int K[TESTS_N] = { 2,  6,  3, 28,   7,  500, 1763,  9056};
+  const unsigned int TESTS_N = 9;
+  const unsigned int N[TESTS_N] = {10, 10, 17, 51, 159, 3000, 1000, 3456, 10056};
+  const unsigned int D[TESTS_N] = { 1,  2,  3,  5,  11,    2,   12,   24,    32};
+  const unsigned int K[TESTS_N] = { 2,  6,  3, 28,   7,   20,  500, 1763,  9056};
 
   for (int i = 0; i < TESTS_N; ++i) {
     const unsigned int n = N[i];
