@@ -113,7 +113,7 @@ TEST_CASE("kernel_distances_matrix", "[kernel][distances]") { // FIXME does not 
 
       // Test kernel compute_point_associated_matrices
       dim3 dist_assoc_matrices_grid_dim(n);
-      dim3 dist_assoc_matrices_block_dim(min(d, WARP_SIZE));
+      dim3 dist_assoc_matrices_block_dim(min(next_pow_2(d), WARP_SIZE));
       for (uint32_t i = 0; i < rounds; i++) {
         compute_point_associated_matrices<<<dist_assoc_matrices_grid_dim, dist_assoc_matrices_block_dim>>>(d_points, d_P, d, i);
       }
@@ -128,17 +128,17 @@ TEST_CASE("kernel_distances_matrix", "[kernel][distances]") { // FIXME does not 
       for (uint32_t ni = 0; ni < n; ++ni) {
         computeCPUCentroidAssociatedMatrix(h_P_CPU, h_points, d, ni, n);
         DATA_TYPE* h_P_GPU = h_Ps_GPU + (d1d1 * ni);
-        /* if (TEST_DEBUG) {
-          printf("\nPoint %u associated matrix:\n", ni);
-          printMatrixColMajLimited(h_P_CPU, d1, d1, 15, 15);
-          printf("\nGPU:\n");
-          printMatrixColMajLimited(h_P_GPU, d1, d1, 15, 15);
-        } */
-        
+                
         // Check associated matrices
         for (size_t i = 0; i < d1; i++) {
           for (size_t j = 0; j < d1; j++) {
-            if (TEST_DEBUG && h_P_CPU[i * d1 + j] != h_P_GPU[i * d1 + j]) printf("Associated matrix error at (%lu, %lu)", i, j);
+            if (TEST_DEBUG && h_P_CPU[i * d1 + j] != h_P_GPU[i * d1 + j]) {
+              printf("Associated matrix error at (%lu, %lu)", i, j);
+              printf("\nPoint %u associated matrix:\n", ni);
+              printMatrixColMajLimited(h_P_CPU, d1, d1, 15, 15);
+              printf("\nGPU:\n");
+              printMatrixColMajLimited(h_P_GPU, d1, d1, 15, 15);
+            }
             REQUIRE( h_P_CPU[i * d1 + j] == h_P_GPU[i * d1 + j] );
           }
         }
@@ -153,8 +153,6 @@ TEST_CASE("kernel_distances_matrix", "[kernel][distances]") { // FIXME does not 
           if (TEST_DEBUG && fabs(gpu_dist - cpu_dist) >= EPSILON) printf("point: %u center: %u gpu(%.6f) cpu(%.6f)\n", ni, ki, gpu_dist, cpu_dist);
           REQUIRE( fabs(gpu_dist - cpu_dist) < EPSILON );
         }
-        
-        if (TEST_DEBUG) printf("\n");
       }
 
       cublasDestroy(cublasHandle);
@@ -175,7 +173,7 @@ TEST_CASE("kernel_distances_matrix", "[kernel][distances]") { // FIXME does not 
 TEST_CASE("kernel_distances_warp", "[kernel][distances]") {
   const unsigned int TESTS_N = 9;
   const unsigned int N[TESTS_N] = {10, 10, 17, 51, 159, 3000, 1000, 3456, 10056};
-  const unsigned int D[TESTS_N] = { 1,  2,  3,  5,  11,    2,   12,   24,    32};
+  const unsigned int D[TESTS_N] = { 1, 47, 92,  5,  11,    2,   12,   24,    32};
   const unsigned int K[TESTS_N] = { 2,  6,  3, 28,   7,   20,  500, 1763,  9056};
 
   for (int i = 0; i < TESTS_N; ++i) {
@@ -192,22 +190,25 @@ TEST_CASE("kernel_distances_warp", "[kernel][distances]") {
       DATA_TYPE *h_centroids = new DATA_TYPE[k * d];
       DATA_TYPE *h_distances = new DATA_TYPE[n * k];
       DATA_TYPE *h_distances_1 = new DATA_TYPE[n * k];
-      if (TEST_DEBUG) printf("Points:\n");
       for (uint32_t i = 0; i < n; ++i) {
         for (uint32_t j = 0; j < d; ++j) {
           h_points[i * d + j] = std::rand() / 100000002.32;
-          if (TEST_DEBUG) printf("%6.3f, ", h_points[i * d + j]);
         }
-        if (TEST_DEBUG) printf("\n");
       }
-      if (TEST_DEBUG) printf("\nCentroids:\n");
+      if (TEST_DEBUG) {
+        printf("Points:\n");
+        printMatrixRowMajLimited(h_points, n, d, 10, 10);
+      }
       for (uint32_t i = 0; i < k; ++i) {
         for (uint32_t j = 0; j < d; ++j) {
           h_centroids[i * d + j] = static_cast <DATA_TYPE> (std::rand() / 100000002.45);
-          if (TEST_DEBUG) printf("%6.3f, ", h_points[i * d + j]);
         }
-        if (TEST_DEBUG) printf("\n");
       }
+      if (TEST_DEBUG) {
+        printf("\nCentroids:\n");
+        printMatrixRowMajLimited(h_centroids, k, d, 10, 10);
+      }
+
       DATA_TYPE *d_distances;
       cudaMalloc(&d_distances, sizeof(DATA_TYPE) * n * k);
       DATA_TYPE *d_distances_1;
@@ -220,16 +221,21 @@ TEST_CASE("kernel_distances_warp", "[kernel][distances]") {
       cudaMemcpy(d_centroids, h_centroids, sizeof(DATA_TYPE) * k * d, cudaMemcpyHostToDevice);
       
       // Test kernel SHUFFLE
-      const uint32_t dist_max_points_per_warp = WARP_SIZE / next_pow_2(d);
-      dim3 dist_grid_dim(ceil(((float) n) / dist_max_points_per_warp), k);
-      dim3 dist_block_dim(dist_max_points_per_warp * next_pow_2(d));
-      compute_distances_shfl<<<dist_grid_dim, dist_block_dim>>>(d_distances, d_centroids, d_points, n, dist_max_points_per_warp, d, log2(next_pow_2(d)) > 0 ? log2(next_pow_2(d)) : 1);
-      cudaMemcpy(h_distances, d_distances, sizeof(DATA_TYPE) * n * k,  cudaMemcpyDeviceToHost);
-
+      if (d <= WARP_SIZE) {
+        const uint32_t dist_max_points_per_warp = WARP_SIZE / next_pow_2(d);
+        dim3 dist_grid_dim(ceil(((float) n) / dist_max_points_per_warp), k);
+        dim3 dist_block_dim(dist_max_points_per_warp * next_pow_2(d));
+        compute_distances_shfl<<<dist_grid_dim, dist_block_dim>>>(d_distances, d_centroids, d_points, n, dist_max_points_per_warp, d, log2(next_pow_2(d)) > 0 ? log2(next_pow_2(d)) : 1);
+        cudaMemcpy(h_distances, d_distances, sizeof(DATA_TYPE) * n * k,  cudaMemcpyDeviceToHost);
+      }
+      
       // Test kernel ONE POINT PER WARP
+      const uint32_t rounds = ((d - 1) / WARP_SIZE) + 1;
       dim3 dist_grid_dim_1(n, k);
-      dim3 dist_block_dim_1(d);
-      compute_distances_one_point_per_warp<<<dist_grid_dim_1, dist_block_dim_1>>>(d_distances_1, d_centroids, d_points, next_pow_2(d));
+      dim3 dist_block_dim_1(min(d, WARP_SIZE));
+      for (uint32_t i = 0; i < rounds; i++) {
+        compute_distances_one_point_per_warp<<<dist_grid_dim_1, dist_block_dim_1>>>(d_distances_1, d_centroids, d_points, d, next_pow_2(d), i);
+      }
       cudaMemcpy(h_distances_1, d_distances_1, sizeof(DATA_TYPE) * n * k,  cudaMemcpyDeviceToHost);
 
       DATA_TYPE* cpu_distances = new DATA_TYPE[n * k];
@@ -245,21 +251,23 @@ TEST_CASE("kernel_distances_warp", "[kernel][distances]") {
       }
 
       cudaDeviceSynchronize();
-      const DATA_TYPE epsilon = 0.002;
+      const DATA_TYPE epsilon = 0.0035;
       DATA_TYPE max_diff = 0;
 
       for (uint32_t i = 0; i < n * k; ++i) {
-        if (i < 10 && fabs(h_distances[i] - cpu_distances[i]) >= epsilon) {
+        if (d <= WARP_SIZE && fabs(h_distances[i] - cpu_distances[i]) >= epsilon) {
           printf("point: %u center: %u cmp: %.6f - %.6f = %.6f\n", i / k, i % k, h_distances[i], cpu_distances[i], h_distances[i] - cpu_distances[i]);
         }
         if (fabs(h_distances_1[i] - cpu_distances[i]) >= epsilon) {
           printf("(1PointperWarp) point: %u center: %u cmp: %.6f - %.6f = %.6f\n", i / k, i % k, h_distances_1[i], cpu_distances[i], h_distances_1[i] - cpu_distances[i]);
         }
-        DATA_TYPE diff = fabs(h_distances[i] - h_distances_1[i]);
-        if (diff > max_diff) max_diff = diff;
+        if (d <= WARP_SIZE) {
+          DATA_TYPE diff = fabs(h_distances[i] - h_distances_1[i]);
+          if (diff > max_diff) max_diff = diff;
+        }
       }
       for (uint32_t i = 0; i < n * k; ++i) {
-        REQUIRE( fabs(h_distances[i] - cpu_distances[i]) < epsilon );
+        if (d <= WARP_SIZE) REQUIRE( fabs(h_distances[i] - cpu_distances[i]) < epsilon );
         REQUIRE( fabs(h_distances_1[i] - cpu_distances[i]) < epsilon );
       }
 

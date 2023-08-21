@@ -139,7 +139,7 @@ void printMatrixColMajLimited (DATA_TYPE* M, uint32_t rows, uint32_t cols, uint3
 
 void printMatrixRowMajLimited (DATA_TYPE* M, uint32_t rows, uint32_t cols, uint32_t max_cols, uint32_t max_rows) {
   const uint32_t c = min(cols, max_cols);
-  const uint32_t r = min(cols, max_rows);
+  const uint32_t r = min(rows, max_rows);
   for (uint32_t i = 0; i < r; ++i) {
     for (uint32_t j = 0; j < c; ++j) {
       printf("%8.3f ", M[i * cols + j]);

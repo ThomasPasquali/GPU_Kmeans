@@ -4,6 +4,7 @@
 
 #include "kernels.cuh"
 #include "../utils.cuh"
+#include "../kmeans.cuh"
 
 #define DEBUG_GEMM 0
 
@@ -16,20 +17,28 @@
  * @param centroids 
  * @param points 
  * @param d_closest_2_pow passed as parameter to avoid useless computations
+ * @param round used if d > 32 to handle multiple warp per point
  */
-__global__ void compute_distances_one_point_per_warp(DATA_TYPE* distances, const DATA_TYPE* centroids, const DATA_TYPE* points, const uint32_t d_closest_2_pow) {
-  const uint64_t point_offset = blockIdx.x * blockDim.x + threadIdx.x;
-  const uint64_t center_offset = blockIdx.y * blockDim.x + threadIdx.x;
+__global__ void compute_distances_one_point_per_warp(DATA_TYPE* distances, const DATA_TYPE* centroids, const DATA_TYPE* points, const uint32_t d, const uint32_t d_closest_2_pow, const uint32_t round) {
+  const uint32_t d_offset = threadIdx.x + (round * warpSize);
+  const uint32_t point_offset = blockIdx.x * d + d_offset;
+  const uint32_t center_offset = blockIdx.y * d + d_offset;
 
-  DATA_TYPE dist = points[point_offset] - centroids[center_offset];
-  dist *= dist;
-  
-  for (int i = (d_closest_2_pow >> 1); i > 0; i >>= 1) {
-    dist += __shfl_down_sync(DISTANCES_SHFL_MASK, dist, i);
-  }
+  if (d_offset < d) {
+    DATA_TYPE dist = points[point_offset] - centroids[center_offset];
+    dist *= dist;
+    
+    for (int i = (min(warpSize, d_closest_2_pow) >> 1); i > 0; i >>= 1) {
+      dist += __shfl_down_sync(DISTANCES_SHFL_MASK, dist, i);
+    }
 
-  if (threadIdx.x == 0) {
-    distances[(blockIdx.x * gridDim.y) + blockIdx.y] = dist;
+    if (threadIdx.x == 0) {
+      if (round == 0) {
+        distances[(blockIdx.x * gridDim.y) + blockIdx.y] = dist;
+      } else {
+        distances[(blockIdx.x * gridDim.y) + blockIdx.y] += dist;
+      }
+    }
   }
 }
 
@@ -60,6 +69,22 @@ __global__ void compute_distances_shfl(DATA_TYPE* distances, const DATA_TYPE* ce
     if (d_i == 0) {
       distances[(point_i * gridDim.y) + center_i] = dist;
     }
+  }
+}
+
+void schedule_distances_kernel(const cudaDeviceProp *props, const uint32_t n, const uint32_t d, const uint32_t k, dim3 *grid, dim3 *block, uint32_t* max_points_per_warp) {
+  const uint32_t warpSize = props->warpSize;
+  if (d <= warpSize && COMPUTE_DISTANCES_KERNEL == 1) {
+    *max_points_per_warp = warpSize / next_pow_2(d); // Does not work for d > 32
+    dim3 dist_grid_dim(ceil(((float) n) / (*max_points_per_warp)), k);
+    dim3 dist_block_dim((*max_points_per_warp) * next_pow_2(d));
+    *grid   = dist_grid_dim;
+    *block  = dist_block_dim;
+  } else {
+    dim3 dist_grid_dim(n, k);
+    dim3 dist_block_dim(min(d, warpSize));
+    *grid   = dist_grid_dim;
+    *block  = dist_block_dim;
   }
 }
 

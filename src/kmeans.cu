@@ -121,15 +121,10 @@ uint64_t Kmeans::run (uint64_t maxiter) {
   uint64_t iter = 0;
   const uint32_t rounds = ((d - 1) / deviceProps->warpSize) + 1;
 
-  #if COMPUTE_DISTANCES_KERNEL == 0
-    dim3 dist_grid_dim(n, k);
-    dim3 dist_block_dim(d);
-    uint32_t dist_kernel_sh_mem = 0;
-  #elif COMPUTE_DISTANCES_KERNEL == 1
-    const uint32_t dist_max_points_per_warp = deviceProps->warpSize / next_pow_2(d); // Does not work for d > 32
-    dim3 dist_grid_dim(ceil(((float) n) / dist_max_points_per_warp), k);
-    dim3 dist_block_dim(dist_max_points_per_warp * next_pow_2(d));
-    uint32_t dist_kernel_sh_mem = 0;
+  #if COMPUTE_DISTANCES_KERNEL <= 1
+    dim3 dist_grid_dim, dist_block_dim;
+    uint32_t dist_max_points_per_warp;
+    schedule_distances_kernel(deviceProps, n, d, k, &dist_grid_dim, &dist_block_dim, &dist_max_points_per_warp);
   #else
     DATA_TYPE* d_points_assoc_matrices;
     DATA_TYPE* d_centroids_matrix;
@@ -165,7 +160,7 @@ uint64_t Kmeans::run (uint64_t maxiter) {
     #if COMPUTE_DISTANCES_KERNEL >= 2
       if (DEBUG_KERNELS_INVOKATION) printf(YELLOW "[KERNEL]" RESET " Matmul\n");
     #else
-      if (DEBUG_KERNELS_INVOKATION) printf(YELLOW "[KERNEL]" RESET " %-25s: Grid (%4u, %4u, %4u), Block (%4u, %4u, %4u), Sh.mem. %uB\n", "compute_distances", dist_grid_dim.x, dist_grid_dim.y, dist_grid_dim.z, dist_block_dim.x, dist_block_dim.y, dist_block_dim.z, dist_kernel_sh_mem);
+      if (DEBUG_KERNELS_INVOKATION) printf(YELLOW "[KERNEL]" RESET " %-25s: Grid (%4u, %4u, %4u), Block (%4u, %4u, %4u), Sh.mem. %uB\n", "compute_distances", dist_grid_dim.x, dist_grid_dim.y, dist_grid_dim.z, dist_block_dim.x, dist_block_dim.y, dist_block_dim.z, 0);
     #endif
     #if PERFORMANCES_KERNEL_DISTANCES
       cudaEvent_t e_perf_dist_start, e_perf_dist_stop;
@@ -173,10 +168,14 @@ uint64_t Kmeans::run (uint64_t maxiter) {
       cudaEventCreate(&e_perf_dist_stop);
       cudaEventRecord(e_perf_dist_start);
     #endif
-    #if COMPUTE_DISTANCES_KERNEL == 0
-      compute_distances_one_point_per_warp<<<dist_grid_dim, dist_block_dim>>>(d_distances, d_centroids, d_points, next_pow_2(d));
-    #elif COMPUTE_DISTANCES_KERNEL == 1
-      compute_distances_shfl<<<dist_grid_dim, dist_block_dim>>>(d_distances, d_centroids, d_points, n, dist_max_points_per_warp, d, log2(next_pow_2(d)) > 0 ? log2(next_pow_2(d)) : 1);
+    #if COMPUTE_DISTANCES_KERNEL <= 1
+      if (static_cast<int>(d) <= deviceProps->warpSize && COMPUTE_DISTANCES_KERNEL == 1) {
+        compute_distances_shfl<<<dist_grid_dim, dist_block_dim>>>(d_distances, d_centroids, d_points, n, dist_max_points_per_warp, d, log2(next_pow_2(d)) > 0 ? log2(next_pow_2(d)) : 1);
+      } else {
+        for (uint32_t i = 0; i < rounds; i++) {
+          compute_distances_one_point_per_warp<<<dist_grid_dim, dist_block_dim>>>(d_distances, d_centroids, d_points, d, next_pow_2(d), i);
+        }
+      }
     #else
       CHECK_CUBLAS_ERROR(cublasSetMatrix(k, d1, sizeof(DATA_TYPE), h_centroids_matrix, k, d_centroids_matrix, k)); // same as CHECK_CUDA_ERROR(cudaMemcpy(d_centroids_matrix, h_centroids_matrix, CENTROIDS_BYTES, cudaMemcpyHostToDevice));
       compute_gemm_distances(cublasHandle, d1, n, k, d_points_assoc_matrices, d_centroids_matrix, d_distances);
@@ -218,11 +217,15 @@ uint64_t Kmeans::run (uint64_t maxiter) {
         }
       }
       DATA_TYPE* tmp_dist = new DATA_TYPE[n * k];
+      int anyError = 0;
       CHECK_CUDA_ERROR(cudaMemcpy(tmp_dist, d_distances, n * k * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost));
       for (uint32_t i = 0; i < n; ++i)
         for (uint32_t j = 0; j < k; ++j)
-          if (fabs(tmp_dist[i * k + j] - cpu_distances[i * k + j]) > 0.001) printf("N=%-2u K=%-2u -> GPU=%.4f CPU=%.4f diff: %.8f\n", i, j, tmp_dist[i * k + j], cpu_distances[i * k + j], fabs(tmp_dist[i * k + j] - cpu_distances[i * k + j]));
-      cout << RESET << endl;
+          if (fabs(tmp_dist[i * k + j] - cpu_distances[i * k + j]) > 0.001) {
+            printf("N=%-2u K=%-2u -> GPU=%.4f CPU=%.4f diff: %.8f\n", i, j, tmp_dist[i * k + j], cpu_distances[i * k + j], fabs(tmp_dist[i * k + j] - cpu_distances[i * k + j]));
+            anyError = 1;
+          }
+      cout << (anyError ? "Something wrong" : "Everything alright") << RESET << endl;
       delete[] cpu_distances;
       delete[] tmp_dist;
     #endif
