@@ -6,12 +6,12 @@ SRC_DIR=src
 
 ALL_TARGETS=kmeans
 
-$(BIN_DIR)/kmeans: $(SRC_DIR)/main.cpp $(SRC_DIR)/kmeans.cpp 
+$(BIN_DIR)/kmeans: $(SRC_DIR)/main.cpp $(SRC_DIR)/kmeans.cpp
 	@ mkdir -p $(BIN_DIR)
 	@ $(CC) $(CFLAGS) $^ -o $@
 
 all: $(addprefix $(BIN_DIR)/,$(ALL_TARGETS))
 
-clean: 
-	@ rm -f $(BIN_DIR)/$(SRC_DIR)/*
+clean:
+	@ rm -f $(BIN_DIR)/*
 

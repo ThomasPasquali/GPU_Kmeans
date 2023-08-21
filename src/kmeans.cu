@@ -73,7 +73,7 @@ void Kmeans::init_centroids (Point<DATA_TYPE>** points) {
   CHECK_CUDA_ERROR(cudaMalloc(&d_centroids, CENTROIDS_BYTES));
 }
 
-Kmeans::Kmeans (size_t _n, unsigned int _d, unsigned int _k, float _tol, Point<DATA_TYPE>** _points, cudaDeviceProp* _deviceProps)
+Kmeans::Kmeans (const size_t _n, const uint32_t _d, const uint32_t _k, const float _tol, Point<DATA_TYPE>** _points, cudaDeviceProp* _deviceProps)
     : n(_n), d(_d), k(_k), tol(_tol),
     POINTS_BYTES(_n * _d * sizeof(DATA_TYPE)),
     CENTROIDS_BYTES(_k * _d * sizeof(DATA_TYPE)),
