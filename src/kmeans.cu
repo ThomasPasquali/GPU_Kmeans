@@ -90,6 +90,7 @@ Kmeans::Kmeans (size_t _n, unsigned int _d, unsigned int _k, float _tol, Point<D
   CHECK_CUDA_ERROR(cudaMemcpy(d_points, h_points, POINTS_BYTES, cudaMemcpyHostToDevice));
 
   init_centroids(_points);
+  CHECK_CUDA_ERROR(cudaMemcpy(d_centroids, h_centroids, d * k * sizeof(DATA_TYPE), cudaMemcpyHostToDevice));
 }
 
 Kmeans::~Kmeans () {
@@ -102,6 +103,7 @@ Kmeans::~Kmeans () {
   if (h_centroids_matrix != NULL) {
     CHECK_CUDA_ERROR(cudaFreeHost(h_centroids_matrix));
   }
+  compute_gemm_distances_free();
 }
 
 uint64_t Kmeans::run (uint64_t maxiter) {
@@ -138,7 +140,10 @@ uint64_t Kmeans::run (uint64_t maxiter) {
     CHECK_CUDA_ERROR(cudaMemset(d_points_assoc_matrices, 0, nd1d1 * sizeof(DATA_TYPE)));
     CHECK_CUDA_ERROR(cudaMalloc(&d_centroids_matrix, CENTROIDS_BYTES));
     dim3 dist_assoc_matrices_grid_dim(n);
-    dim3 dist_assoc_matrices_block_dim(min(d, deviceProps->warpSize));
+    dim3 dist_assoc_matrices_block_dim(min(next_pow_2(d), deviceProps->warpSize));
+    #if COMPUTE_DISTANCES_KERNEL >= 2 && DEBUG_KERNELS_INVOKATION
+      printf(YELLOW "[KERNEL]" RESET " %-25s: Grid (%4u, %4u, %4u), Block (%4u, %4u, %4u), Sh.mem. %uB\n", "compute_point_associated_matrices", dist_assoc_matrices_grid_dim.x, dist_assoc_matrices_grid_dim.y, dist_assoc_matrices_grid_dim.z, dist_assoc_matrices_block_dim.x, dist_assoc_matrices_block_dim.y, dist_assoc_matrices_block_dim.z, 0);
+    #endif
     for (uint32_t i = 0; i < rounds; i++) {
       compute_point_associated_matrices<<<dist_assoc_matrices_grid_dim, dist_assoc_matrices_block_dim>>>(d_points, d_points_assoc_matrices, d, i);
     }
@@ -152,8 +157,6 @@ uint64_t Kmeans::run (uint64_t maxiter) {
 
   dim3 cent_grid_dim, cent_block_dim;
   schedule_centroids_kernel(deviceProps, n, d, k, &cent_grid_dim, &cent_block_dim);
-
-  CHECK_CUDA_ERROR(cudaMemcpy(d_centroids, h_centroids, d * k * sizeof(DATA_TYPE), cudaMemcpyHostToDevice));
 
   /* MAIN LOOP */
   while (iter++ < maxiter) {

@@ -89,7 +89,7 @@ __global__ void compute_point_associated_matrices (const DATA_TYPE* points, DATA
   DATA_TYPE c = points[p_i * d + d_i];
   DATA_TYPE c_11 = c * c;
 
-  for (int i = warpSize >> 2; i > 0; i >>= 1) { // Reduce c_11
+  for (int i = blockDim.x >> 1; i > 0; i >>= 1) { // Reduce c_11
     c_11 += __shfl_down_sync(DISTANCES_SHFL_MASK, c_11, i);
   }
 
@@ -104,7 +104,10 @@ __global__ void compute_point_associated_matrices (const DATA_TYPE* points, DATA
 }
 
 DATA_TYPE* d_tmp = NULL; // https://docs.nvidia.com/cuda/cublas/index.html#cublas-t-gemm
+DATA_TYPE* h_distances = NULL;
+DATA_TYPE* h_tmp = NULL;
 uint32_t d_tmp_dim = 0;
+uint32_t last_nk = 0;
 /**
  * @brief Computes and writes to d_distances the distance of each point-center (row-major, in this order)
  * 
@@ -116,28 +119,35 @@ uint32_t d_tmp_dim = 0;
  * @param d_C the matrix of centers (prefixed with 1s)
  * @param d_distances size: n * k
  */
-void compute_gemm_distances (cublasHandle_t& handle, uint32_t d1, uint32_t n, uint32_t k, DATA_TYPE* d_P, DATA_TYPE* d_C, DATA_TYPE* d_distances) {
+void compute_gemm_distances (cublasHandle_t& handle, const uint32_t d1, const uint32_t n, const uint32_t k, const DATA_TYPE* d_P, const DATA_TYPE* d_C, DATA_TYPE* d_distances) {
   DATA_TYPE alpha = (DATA_TYPE)1;
   DATA_TYPE beta = (DATA_TYPE)0;
   uint32_t d1d1 = d1 * d1;
-  DATA_TYPE* P = d_P;
+  const DATA_TYPE* P = d_P;
   uint32_t max_k_d1 = max(k, d1);
-  DATA_TYPE h_distances[k * n];
-  DATA_TYPE h_tmp[max_k_d1 * max_k_d1];
-  if (d_tmp_dim <= 0 || max_k_d1 != d_tmp_dim) {
+  if (last_nk <= 0 || (n * k) > last_nk) {
+    if (h_distances != NULL) delete[] h_distances;
+    h_distances = new DATA_TYPE[n * k];
+  }
+  if (d_tmp_dim <= 0 || max_k_d1 > d_tmp_dim) {
+    if (d_tmp != NULL) CHECK_CUDA_ERROR(cudaFree(d_tmp));
+    if (h_tmp != NULL) delete[] h_tmp;
     CHECK_CUDA_ERROR(cudaMalloc(&d_tmp, max_k_d1 * max_k_d1 * sizeof(DATA_TYPE)));
+    h_tmp = new DATA_TYPE[max_k_d1 * max_k_d1];
   }
 
   for (uint32_t p_i = 0; p_i < n; ++p_i, P += d1d1) { // Iterate over points associated matrices
     #if DEBUG_GEMM
       printf("\nc\n");
-      DATA_TYPE tmp_debug1[n * d1];
+      DATA_TYPE* tmp_debug1 = new DATA_TYPE[n * d1];
       CHECK_CUBLAS_ERROR(cublasGetMatrix(k, d1, sizeof(DATA_TYPE), d_C, k, tmp_debug1, k));
-      printMatrixColMaj(tmp_debug1, k, d1);
+      printMatrixColMajLimited(tmp_debug1, k, d1, 5, 5);
       printf("\nP_%d associated matrix\n", p_i);
-      DATA_TYPE tmp_debug[d1d1];
+      DATA_TYPE* tmp_debug = new DATA_TYPE[d1d1];
       CHECK_CUBLAS_ERROR(cublasGetMatrix(d1, d1, sizeof(DATA_TYPE), P, d1, tmp_debug, d1));
-      printMatrixColMaj(tmp_debug, d1, d1);
+      printMatrixColMajLimited(tmp_debug, d1, d1, 5, 5);
+      delete[] tmp_debug;
+      delete[] tmp_debug1;
       printf("\n");
     #endif
     
@@ -149,9 +159,10 @@ void compute_gemm_distances (cublasHandle_t& handle, uint32_t d1, uint32_t n, ui
 
     #if DEBUG_GEMM
       printf("\nc * P\n");
-      DATA_TYPE tmp_debug2[k * d1];
+      DATA_TYPE* tmp_debug2 = new DATA_TYPE[k * d1];
       CHECK_CUBLAS_ERROR(cublasGetMatrix(k, d1, sizeof(DATA_TYPE), d_tmp, k, tmp_debug2, k));
-      printMatrixColMaj(tmp_debug2, k, d1);
+      printMatrixColMajLimited(tmp_debug2, k, d1, 5, 5);
+      delete[] tmp_debug2;
       printf("\n");
     #endif
 
@@ -169,12 +180,21 @@ void compute_gemm_distances (cublasHandle_t& handle, uint32_t d1, uint32_t n, ui
 
     #if DEBUG_GEMM
       printf("Distances from P_%d\n", p_i);
-      printMatrixColMaj(h_tmp, k, k);
+      printMatrixColMajLimited(h_tmp, k, k, 5, 5);
       printf("\n----------\n");
     #endif
   }
   // Copy distances to GPU
   CHECK_CUDA_ERROR(cudaMemcpy(d_distances, h_distances, n * k * sizeof(DATA_TYPE), cudaMemcpyHostToDevice));
+}
+
+void compute_gemm_distances_free () {
+  if (d_tmp != NULL) CHECK_CUDA_ERROR(cudaFree(d_tmp));
+  if (h_distances != NULL) delete[] h_distances;
+  if (h_tmp != NULL) delete[] h_tmp;
+  d_tmp = NULL;
+  h_distances = NULL;
+  h_tmp = NULL;
 }
 
 /*** END Matrix multiplication ***/

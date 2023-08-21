@@ -55,12 +55,11 @@ void computeCPUCentroidAssociatedMatrix (DATA_TYPE* A, DATA_TYPE* points, uint32
 
 TEST_CASE("kernel_distances_matrix", "[kernel][distances]") { // FIXME does not work well with N >= 500
   const unsigned int TESTS_N = 8;
-  const unsigned int N[TESTS_N] = {10, 10, 17, 30, 17,   15,  300, 500};
-  const unsigned int D[TESTS_N] = { 1,  2,  3, 11, 42, 1500,  400,  600};
-  const unsigned int K[TESTS_N] = { 2,  6,  3, 11, 20,    5,   10,  200};
-  const unsigned int MAX_COLS = 4;
+  const unsigned int N[TESTS_N] = {10, 10, 17, 30, 17,   15,  300,  2000};
+  const unsigned int D[TESTS_N] = { 1,  2,  3, 11, 42, 1500,  400,   200};
+  const unsigned int K[TESTS_N] = { 2,  6,  3, 11, 20,    5,   10,   200};
 
-  for (int test_i = 0; test_i < 5; ++test_i) {
+  for (int test_i = 0; test_i < TESTS_N; ++test_i) {
     const unsigned int n = N[test_i];
     const unsigned int d = D[test_i];
     const unsigned int d1 = d + 1;
@@ -72,7 +71,7 @@ TEST_CASE("kernel_distances_matrix", "[kernel][distances]") { // FIXME does not 
     char test_name[50];
     sprintf(test_name, "kernel compute_distances_matrix n: %u  d: %u  k: %u", n, d, k);
     SECTION(test_name) {
-      if (TEST_DEBUG) printf("Test: %s\n", test_name);
+      printf("Test: %s\n", test_name);
 
       DATA_TYPE *h_points = new DATA_TYPE[n * d];
       DATA_TYPE *h_points_row_maj = new DATA_TYPE[n * d];
@@ -100,8 +99,6 @@ TEST_CASE("kernel_distances_matrix", "[kernel][distances]") { // FIXME does not 
         printMatrixColMajLimited(h_centroids, k, d1, 10, 5);
       }
 
-      cublasStatus_t stat;
-      cublasHandle_t handle;
       DATA_TYPE* d_points;
       cudaMalloc(&d_points, n * d * sizeof(DATA_TYPE));
       cudaMemcpy(d_points, h_points_row_maj, n * d * sizeof(DATA_TYPE), cudaMemcpyHostToDevice);
@@ -122,29 +119,30 @@ TEST_CASE("kernel_distances_matrix", "[kernel][distances]") { // FIXME does not 
       }
       cudaMemcpy(h_Ps_GPU, d_P, nd1d1 * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost);
 
+      // Test function compute_gemm_distances
+      cublasHandle_t cublasHandle;
+      cublasCreate(&cublasHandle);
+      compute_gemm_distances(cublasHandle, d1, n, k, d_P, d_C, d_distances);
+      cudaMemcpy(h_distances, d_distances, n * k * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost);
+
       for (uint32_t ni = 0; ni < n; ++ni) {
         computeCPUCentroidAssociatedMatrix(h_P_CPU, h_points, d, ni, n);
         DATA_TYPE* h_P_GPU = h_Ps_GPU + (d1d1 * ni);
-        if (TEST_DEBUG) {
+        /* if (TEST_DEBUG) {
           printf("\nPoint %u associated matrix:\n", ni);
           printMatrixColMajLimited(h_P_CPU, d1, d1, 15, 15);
           printf("\nGPU:\n");
           printMatrixColMajLimited(h_P_GPU, d1, d1, 15, 15);
-        }
-
+        } */
+        
         // Check associated matrices
         for (size_t i = 0; i < d1; i++) {
           for (size_t j = 0; j < d1; j++) {
+            if (TEST_DEBUG && h_P_CPU[i * d1 + j] != h_P_GPU[i * d1 + j]) printf("Associated matrix error at (%lu, %lu)", i, j);
             REQUIRE( h_P_CPU[i * d1 + j] == h_P_GPU[i * d1 + j] );
           }
         }
         
-        // Test function compute_gemm_distances
-        cublasHandle_t cublasHandle;
-        cublasCreate(&cublasHandle);
-        compute_gemm_distances(cublasHandle, d1, n, k, d_P, d_C, d_distances);
-        cudaMemcpy(h_distances, d_distances, n * k * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost);
-
         for (uint32_t ki = 0; ki < k; ++ki) {
           DATA_TYPE cpu_dist = 0, tmp;
           for (uint32_t di = 0; di < d; ++di) {
@@ -152,14 +150,14 @@ TEST_CASE("kernel_distances_matrix", "[kernel][distances]") { // FIXME does not 
             cpu_dist += tmp * tmp;
           }
           DATA_TYPE gpu_dist = h_distances[ni * k + ki];
-          if (TEST_DEBUG) printf("point: %u center: %u gpu(%.6f) cpu(%.6f)\n", ni, ki, gpu_dist, cpu_dist);
+          if (TEST_DEBUG && fabs(gpu_dist - cpu_dist) >= EPSILON) printf("point: %u center: %u gpu(%.6f) cpu(%.6f)\n", ni, ki, gpu_dist, cpu_dist);
           REQUIRE( fabs(gpu_dist - cpu_dist) < EPSILON );
         }
-
+        
         if (TEST_DEBUG) printf("\n");
-        cublasDestroy(cublasHandle);
       }
 
+      cublasDestroy(cublasHandle);
       delete[] h_P_CPU;
       delete[] h_Ps_GPU;
       delete[] h_points;
@@ -170,6 +168,8 @@ TEST_CASE("kernel_distances_matrix", "[kernel][distances]") { // FIXME does not 
 
     }
   }
+
+  compute_gemm_distances_free();
 }
 
 TEST_CASE("kernel_distances_warp", "[kernel][distances]") {
@@ -187,7 +187,7 @@ TEST_CASE("kernel_distances_warp", "[kernel][distances]") {
     sprintf(test_name, "kernel compute_distances_shfl n: %u  d: %u  k: %u", n, d, k);
     
     SECTION(test_name) {
-      if (TEST_DEBUG) printf("TEST: %s\n", test_name);
+      printf("Test: %s\n", test_name);
       DATA_TYPE *h_points = new DATA_TYPE[n * d];
       DATA_TYPE *h_centroids = new DATA_TYPE[k * d];
       DATA_TYPE *h_distances = new DATA_TYPE[n * k];
