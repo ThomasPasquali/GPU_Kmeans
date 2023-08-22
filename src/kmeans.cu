@@ -243,7 +243,6 @@ uint64_t Kmeans::run (uint64_t maxiter) {
 
     CHECK_CUDA_ERROR(cudaMemset(d_clusters_len, 0, k * sizeof(uint32_t)));
     clusters_argmin_shfl<<<argmin_grid_dim, argmin_block_dim, argmin_sh_mem>>>(n, k, d_distances, d_points_clusters, d_clusters_len, argmin_warps_per_block, INFNTY);
-    CHECK_CUDA_ERROR(cudaDeviceSynchronize());
 
     #if PERFORMANCES_KERNEL_ARGMIN
       cudaEventRecord(e_perf_argmin_stop);
@@ -282,7 +281,6 @@ uint64_t Kmeans::run (uint64_t maxiter) {
     for (uint32_t i = 0; i < rounds; i++) {
       compute_centroids_shfl<<<cent_grid_dim, cent_block_dim>>>(d_centroids, d_points, d_points_clusters, d_clusters_len, n, d, k, i);
     }
-    CHECK_CUDA_ERROR(cudaDeviceSynchronize());
 
     #if PERFORMANCES_KERNEL_CENTROIDS
       cudaEventRecord(e_perf_cent_stop);
@@ -331,6 +329,7 @@ uint64_t Kmeans::run (uint64_t maxiter) {
     #endif
 
     CHECK_CUDA_ERROR(cudaMemcpy(h_centroids, d_centroids, d * k * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost));
+    CHECK_CUDA_ERROR(cudaDeviceSynchronize());
 
     /////////////////////////////////////////////* CHECK IF CONVERGED */////////////////////////////////////////////
 
