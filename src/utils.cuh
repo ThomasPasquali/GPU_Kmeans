@@ -6,6 +6,7 @@
 
 using namespace std;
 
+#define clz(x) __builtin_clz(x)
 #define IDX2C(i,j,ld) (((j)*(ld))+(i))
 
 #define CHECK_CUBLAS_ERROR(val)   checkCUBLAS((val), #val, __FILE__, __LINE__)

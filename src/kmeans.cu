@@ -17,8 +17,8 @@
 using namespace std;
 
 random_device rd;
-seed_seq seed{0}; // FIXME use rd()
-mt19937 rng(seed);
+// seed_seq seed{0};
+mt19937 rng(rd());
 
 const DATA_TYPE INFNTY  = numeric_limits<DATA_TYPE>::infinity();
 

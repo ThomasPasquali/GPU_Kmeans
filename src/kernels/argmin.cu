@@ -1,3 +1,4 @@
+#include <bits/stdc++.h>
 #include <cub/cub.cuh>
 #include "kernels.cuh"
 #include "../utils.cuh"
@@ -16,7 +17,6 @@ __device__ Pair argmin (Pair a, Pair b) {
 
 __device__ Pair warp_argmin (float a) {
   Pair t{a, (uint32_t)threadIdx.x & 31};
-
   t = argmin(t, shfl_xor_sync(t, 1));
   t = argmin(t, shfl_xor_sync(t, 2));
   t = argmin(t, shfl_xor_sync(t, 4));
@@ -26,17 +26,18 @@ __device__ Pair warp_argmin (float a) {
 }
 
 __global__ void clusters_argmin_shfl(const uint32_t n, const uint32_t k, DATA_TYPE* d_distances, uint32_t* points_clusters,  uint32_t* clusters_len, uint32_t warps_per_block, DATA_TYPE infty) {
+  const uint32_t warpSizeLog2 = sizeof(uint32_t) * CHAR_BIT - clz(warpSize) - 1;
   extern __shared__ Pair shrd[];
   const uint32_t tid = threadIdx.x;
-  const uint32_t lane = tid % warpSize;
-  const uint32_t wid = tid / warpSize;
+  const uint32_t lane = tid & (warpSize - 1);
+  const uint32_t wid = tid >> warpSizeLog2;
   const uint32_t idx = blockIdx.x * k + tid;
   float val = tid < k ? d_distances[idx] : infty;
 
   Pair p = warp_argmin(val);
 
   if (lane == 0) {
-    p.i += 32 * wid; // Remap p.i
+    p.i += wid << warpSizeLog2; // Remap p.i
     shrd[wid] = p;
   }
   

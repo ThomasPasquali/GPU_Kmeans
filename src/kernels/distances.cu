@@ -121,7 +121,7 @@ __global__ void compute_point_associated_matrices (const DATA_TYPE* points, DATA
   const uint32_t d1 = d + 1;
   const uint32_t matrix_base_i = p_i * d1 * d1;
   if (threadIdx.x == 0) {
-    atomicAdd(&associated_matrices[matrix_base_i], c_11); // Write reduced c_11
+    associated_matrices[matrix_base_i] += c_11; // Write reduced c_11
   }
   associated_matrices[matrix_base_i + d_i1] = -c;               // Write first column
   associated_matrices[matrix_base_i + (d_i1 * d1)] = -c;        // Write first row

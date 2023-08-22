@@ -2,24 +2,26 @@
 #include "../utils.cuh"
 
 __global__ void compute_centroids_shfl(DATA_TYPE* centroids, const DATA_TYPE* points, const uint32_t* points_clusters, const uint32_t* clusters_len, const uint64_t n, const uint32_t d, const uint32_t k, const uint32_t round) {
-  const uint32_t block_base = warpSize * round;  // Get in which block of d the kernel works (0 <= d < 32 => block_base = 0; 32 <= d < 64 => block_base = 32; ...)
-  if (block_base + threadIdx.y >= d) { return; } // threadIdx.y represents the dim; if the thread is responsible for a dim >= d, then return to avoid illegal writes
+  const uint32_t block_base = round * warpSize;  // Get in which block of d the kernel works (0 <= d < 32 => block_base = 0; 32 <= d < 64 => block_base = 32; ...)
+  if (block_base + threadIdx.y >= d) { return; }      // threadIdx.y represents the dim; if the thread is responsible for a dim >= d, then return to avoid illegal writes
 
-  const uint32_t cluster_idx   = 2 * blockIdx.y * blockDim.x + threadIdx.x;  // Index of the cluster assignment for the current point
-  const uint32_t point_idx     = block_base + cluster_idx * d + threadIdx.y; // Index of the dim for the current point
-  const uint32_t cluster_off   = blockDim.x;                                 // Offset for the cluster assignment
-  const uint32_t point_off     = cluster_off * d;                            // Offset for the dim for the current point
-  const uint32_t centroids_idx = block_base + blockIdx.x * d + threadIdx.y;  // Index of the current dim in the centroid matrix
+  const uint32_t cluster_idx   = ((blockIdx.y * blockDim.x) << 1) + threadIdx.x;  // Index of the cluster assignment for the current point
+  const uint32_t point_idx     = block_base + cluster_idx * d + threadIdx.y;      // Index of the dim for the current point
+  const uint32_t cluster_off   = blockDim.x;                                      // Offset for the cluster assignment
+  const uint32_t point_off     = cluster_off * d;                                 // Offset for the dim for the current point
+  const uint32_t centroids_idx = block_base + blockIdx.x * d + threadIdx.y;       // Index of the current dim in the centroid matrix
+  const uint32_t nd = n * d;
+  const uint32_t kd = k * d;
 
   DATA_TYPE val = 0;
 
   // If the point is in the matrix of points and the block is responsible of the cluster assigned, then get the value
-  if (point_idx < n * d && blockIdx.x == points_clusters[cluster_idx]) {
+  if (point_idx < nd && blockIdx.x == points_clusters[cluster_idx]) {
     val = points[point_idx];
   }
 
   // If the point with offset is in the matrix of points and the block is responsible of the cluster assigned, then get the value
-  if (point_idx + point_off < n * d && blockIdx.x == points_clusters[cluster_idx + cluster_off]) {
+  if (point_idx + point_off < nd && blockIdx.x == points_clusters[cluster_idx + cluster_off]) {
     val += points[point_idx + point_off];
   }
 
@@ -29,7 +31,7 @@ __global__ void compute_centroids_shfl(DATA_TYPE* centroids, const DATA_TYPE* po
   }
 
   // The first thread writes atomically the scaled sum in the centroids matrix
-  if (threadIdx.x % warpSize == 0 && val != 0.0 && centroids_idx < k * d) {
+  if ((threadIdx.x & (warpSize - 1)) == 0 && val != 0.0 && centroids_idx < kd) {
     uint32_t count = clusters_len[blockIdx.x] > 1 ? clusters_len[blockIdx.x] : 1;
     DATA_TYPE scale = 1.0 / ((double) count);
     val *= scale;
