@@ -1,46 +1,54 @@
 import pandas as pd
 import argparse
+import torch
 import random
 
+RADIUS_CLUSTER = 0.1
+ROUND_DIGITS = 5
+
 argParser = argparse.ArgumentParser()
-argParser.add_argument("-n", "--n-samples", help="The number of points generated", type=int, required=False, default=1000)
-argParser.add_argument("-d", "--dimensions", help="The number of dimensions of the points", type=int, required=False, default=3)
-argParser.add_argument("-min", "--min-value", help="Lower bound for the generated values", type=float, required=False, default=-100)
-argParser.add_argument("-max", "--max-value", help="Upper bound for the generated values", type=float, required=False, default=100)
-argParser.add_argument("-s", "--seed", help="The seed to user for rng", type=int, required=False, default=None)
-argParser.add_argument("-o", "--out-filename", help="The file to write to", type=str, required=False, default=None)
-argParser.add_argument("-c", "--cluster-col", help="Include cluster column", type=bool, required=False, default=False)
+argParser.add_argument("-n",   "--n-samples",   help="The num of points generated",                type=int,   required=False, default=1000)
+argParser.add_argument("-d",   "--dimensions",  help="The num of dimensions of the points",        type=int,   required=False, default=3)
+argParser.add_argument("-k",   "--n-clusters",  help="The num of cluster (if output clusterized)", type=int,   required=False)
+argParser.add_argument("-min", "--min-value",   help="Lower bound for the generated values",       type=float, required=False)
+argParser.add_argument("-max", "--max-value",   help="Upper bound for the generated values",       type=float, required=False)
+argParser.add_argument("-o",   "--out-dir",     help="The file to write to",                       type=str,   required=False)
 args = argParser.parse_args()
 
-random.seed(args.seed)
+def normalize(x):
+  min = args.min_value if args.min_value != None else 0
+  max = args.max_value if args.max_value != None else 1
+  return x * (max - min) + min
 
-if args.min_value > args.max_value:
-  tmp = args.min_value
-  args.min_value = args.max_value
-  args.max_value = tmp
+df = None
+# Clusterized points
+if args.n_clusters != None:
+  # Generate centroids
+  centroids = torch.rand(args.n_clusters, args.dimensions).numpy()
+  centroids = pd.DataFrame(centroids).applymap(normalize).to_numpy()
 
-# print("args=%s" % args)
+  # Choose cluster lengths
+  clusters_len = []
+  left = args.n_samples
+  for i in range(args.n_clusters - 1):
+    clusters_len.append(int(random.uniform(0, left / 2)))
+    left -= clusters_len[i]
+  clusters_len.append(left)
 
-data = [] # np.random.rand(args.n_samples, args.dimensions)
-if args.cluster_col:
-  for i in range(args.n_samples):
-    data.append([0] + [random.uniform(args.min_value, args.max_value) for j in range(args.dimensions)])
+  # Generate points close to centroids
+  data = []
+  for i in range(args.n_clusters):
+    for j in range(clusters_len[i]):
+      data.append([(centroids[i][k] - random.uniform(-RADIUS_CLUSTER, RADIUS_CLUSTER)) for k in range(args.dimensions)])
+# Uniform random points range [min, max)
+elif args.min_value != None and args.max_value != None:
+  data = torch.rand(args.n_samples, args.dimensions).numpy()
+  data = pd.DataFrame(data).applymap(normalize).to_numpy()
+# Std normal random points
 else:
-  for i in range(args.n_samples):
-    data.append([int(random.uniform(args.min_value, args.max_value)) for j in range(args.dimensions)])
+  data = torch.randn(args.n_samples, args.dimensions).numpy()
 
-columns = None
-if args.cluster_col:
-  columns = ['cluster'] + [f"d{i}" for i in range(args.dimensions)]
-else:
-  columns = [f"d{i}" for i in range(args.dimensions)]
+df = pd.DataFrame(data, columns=[f"d{i}" for i in range(args.dimensions)]).applymap( lambda x : round(x, ROUND_DIGITS))
 
-df = pd.DataFrame(data, columns=columns)
-
-if args.out_filename == None:
-  from io import StringIO
-  output = StringIO()
-  df.to_csv(output, index=False)
-  print(output.getvalue())
-else:
-  df.to_csv(args.out_filename, index=False)
+dirname = args.out_dir if args.out_dir != None else "."
+df.to_csv(f"{dirname}/N{args.n_samples}_D{args.dimensions}.csv", index=False)
