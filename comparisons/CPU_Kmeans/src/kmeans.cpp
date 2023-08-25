@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <vector>
-#include <random>
 #include <iomanip>
 #include <cmath>
 #include <limits>
@@ -12,17 +11,22 @@ using namespace std;
 
 #define DEBUG 0
 
-random_device rd;
-seed_seq seed{0};
-mt19937 rng(seed);
+const DATA_TYPE INFNTY = numeric_limits<DATA_TYPE>::infinity();
 
-const DATA_TYPE INFNTY  = numeric_limits<DATA_TYPE>::infinity();
-
-Kmeans::Kmeans (const size_t _n, const uint32_t _d, const uint32_t _k, const float _tol, Point<DATA_TYPE>** _points) :
+Kmeans::Kmeans (const size_t _n, const uint32_t _d, const uint32_t _k, const float _tol, const int *seed, Point<DATA_TYPE>** _points) :
   n(_n), d(_d), k(_k), tol(_tol),
   POINTS_BYTES(_n * _d * sizeof(DATA_TYPE)),
   CENTROIDS_BYTES(_k * _d * sizeof(DATA_TYPE)),
   points(_points) {
+
+  if (seed) {
+    seed_seq s{*seed};
+    generator = new mt19937(s);
+  }
+  else {
+    random_device rd;
+    generator = new mt19937(rd());
+  }
 
   h_points = new DATA_TYPE[POINTS_BYTES];
   for (size_t i = 0; i < n; ++i) {
@@ -35,13 +39,13 @@ Kmeans::Kmeans (const size_t _n, const uint32_t _d, const uint32_t _k, const flo
 }
 
 Kmeans::~Kmeans () {
+  delete   generator;
   delete[] h_points;
   delete[] points_clusters;
   delete[] h_centroids;
   delete[] h_last_centroids;
 }
 
-/* Kmeans class */
 void Kmeans::init_centroids () {
   uniform_int_distribution<int> random_int(0, n - 1);
 
@@ -52,7 +56,7 @@ void Kmeans::init_centroids () {
   vector<Point<DATA_TYPE>*> usedPoints;
   Point<DATA_TYPE>* centroids[k];
   while (i < k) {
-    Point<DATA_TYPE>* p = points[random_int(rng)];
+    Point<DATA_TYPE>* p = points[random_int(*generator)];
     bool found = false;
     for (auto p1 : usedPoints) {
       if ((*p1) == (*p)) {
@@ -76,6 +80,7 @@ void Kmeans::init_centroids () {
       h_centroids[i * d + j] = centroids[i]->get(j);
     }
   }
+  memcpy(h_last_centroids, h_centroids, CENTROIDS_BYTES);
 }
 
 void Kmeans::compute_distances(DATA_TYPE* distances) {
@@ -192,21 +197,4 @@ bool Kmeans::cmp_centroids () {
     if (sqrt(dist_sum) > tol) { return false; }
   }
   return true;
-}
-
-void Kmeans::to_csv(ostream& o, char separator) {
-  o << "cluster" << separator;
-  for (size_t i = 0; i < d; ++i) {
-    o << "d" << i;
-    if (i != (d - 1)) o << separator;
-  }
-  o << endl;
-  for (size_t i = 0; i < n; ++i) {
-    o << points_clusters[i] << separator;
-    for (size_t j = 0; j < d; ++j) {
-      o << setprecision(8) << h_points[i * d + j];
-      if (j != (d - 1)) o << separator;
-    }
-    o << endl;
-  }
 }

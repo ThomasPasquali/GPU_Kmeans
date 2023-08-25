@@ -5,11 +5,12 @@
 #include "point.hpp"
 
 #define SEPARATOR ","
-#define MAX_LINE  8192
+#define MAX_LINE   8192
+#define PRECISION  8
 
 using namespace std;
 
-template <typename T> 
+template <typename T>
 class InputParser {
   private:
     Point<T> **dataset;
@@ -21,16 +22,16 @@ class InputParser {
       this->dataset = new Point<T>*[_n];
       this->n = _n;
       this->d = _d;
-      
+
       T *point = new T[_d];
       for (size_t i = 0; i <= _n; i++) {
         char str[MAX_LINE] = { 0 };
         in >> str;
         // printf("%s,\n", str);
-        
+
         if (i == (size_t)0) { continue; }
         if (!str[0]) { break; }
-        
+
         int j = 0;
         char *tok = strtok(str, SEPARATOR);
         while (tok && j < _d) {
@@ -40,7 +41,7 @@ class InputParser {
 
         dataset[i - 1] = new Point<T>(point, _d);
       }
-      
+
       delete[] point;
     }
 
@@ -51,6 +52,24 @@ class InputParser {
 
     Point<T> **get_dataset () { return dataset; }
     size_t get_dataset_size() { return n; };
+
+    void dataset_to_csv(ostream& o) {
+      o << "cluster" << SEPARATOR;
+      for (int i = 0; i < d; ++i) {
+        o << "d" << i;
+        if (i != (d - 1)) o << SEPARATOR;
+      }
+      o << endl;
+
+      for (size_t i = 0; i < n; ++i) {
+        o << dataset[i]->getCluster() << SEPARATOR;
+        for (int j = 0; j < d; ++j) {
+          o << setprecision(PRECISION) << dataset[i]->get(j);
+          if (j != (d - 1)) o << SEPARATOR;
+        }
+        o << endl;
+      }
+    }
 
     friend ostream& operator<< (ostream &os, InputParser const& p) {
       const int W = 9;
@@ -65,7 +84,7 @@ class InputParser {
         os << setw(4) << i << setw(W) << *p.dataset[i] << endl;
       }
       if (p.n > 5) {
-        os << " ..." << endl; 
+        os << " ..." << endl;
         for (size_t i = p.n - 5; i < p.n; ++i) {
           os << setw(4) << i << setw(W) << *p.dataset[i] << endl;
         }

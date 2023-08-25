@@ -1,6 +1,5 @@
 #include <stdio.h>
 #include <vector>
-#include <random>
 #include <iomanip>
 #include <cmath>
 #include <limits>
@@ -16,31 +15,72 @@
 
 using namespace std;
 
-random_device rd;
-// seed_seq seed{0};
-mt19937 rng(rd());
+const DATA_TYPE INFNTY = numeric_limits<DATA_TYPE>::infinity();
 
-const DATA_TYPE INFNTY  = numeric_limits<DATA_TYPE>::infinity();
+Kmeans::Kmeans (const size_t _n, const uint32_t _d, const uint32_t _k, const float _tol, const int* seed, Point<DATA_TYPE>** _points, cudaDeviceProp* _deviceProps)
+    : n(_n), d(_d), k(_k), tol(_tol),
+    POINTS_BYTES(_n * _d * sizeof(DATA_TYPE)),
+    CENTROIDS_BYTES(_k * _d * sizeof(DATA_TYPE)),
+    points(_points),
+    deviceProps(_deviceProps) {
 
-/* Kmeans class */
+  if (seed) {
+    seed_seq s{*seed};
+    generator = new mt19937(s);
+  }
+  else {
+    random_device rd;
+    generator = new mt19937(rd());
+  }
+
+  CHECK_CUDA_ERROR(cudaHostAlloc(&h_points, POINTS_BYTES, cudaHostAllocDefault));
+  for (size_t i = 0; i < n; ++i) {
+    for (size_t j = 0; j < d; ++j) {
+      h_points[i * d + j] = _points[i]->get(j);
+    }
+  }
+  CHECK_CUDA_ERROR(cudaMalloc(&d_points, POINTS_BYTES));
+  CHECK_CUDA_ERROR(cudaMemcpy(d_points, h_points, POINTS_BYTES, cudaMemcpyHostToDevice));
+
+  init_centroids(_points);
+  CHECK_CUDA_ERROR(cudaMemcpy(d_centroids, h_centroids, d * k * sizeof(DATA_TYPE), cudaMemcpyHostToDevice));
+}
+
+Kmeans::~Kmeans () {
+  delete generator;
+  CHECK_CUDA_ERROR(cudaFreeHost(h_points));
+  CHECK_CUDA_ERROR(cudaFreeHost(h_centroids));
+  CHECK_CUDA_ERROR(cudaFreeHost(h_last_centroids));
+  CHECK_CUDA_ERROR(cudaFreeHost(h_points_clusters));
+  CHECK_CUDA_ERROR(cudaFree(d_centroids));
+  CHECK_CUDA_ERROR(cudaFree(d_points));
+  if (h_centroids_matrix != NULL) {
+    CHECK_CUDA_ERROR(cudaFreeHost(h_centroids_matrix));
+  }
+  compute_gemm_distances_free();
+}
+
 void Kmeans::init_centroids (Point<DATA_TYPE>** points) {
   uniform_int_distribution<int> random_int(0, n - 1);
+
   if (COMPUTE_DISTANCES_KERNEL >= 2) {
     CENTROIDS_BYTES += (k * sizeof(DATA_TYPE)); // Be aware
     CHECK_CUDA_ERROR(cudaHostAlloc(&h_centroids_matrix, CENTROIDS_BYTES, cudaHostAllocDefault));
   } else {
     h_centroids_matrix = NULL;
   }
+
   CHECK_CUDA_ERROR(cudaHostAlloc(&h_centroids, CENTROIDS_BYTES, cudaHostAllocDefault));
   CHECK_CUDA_ERROR(cudaHostAlloc(&h_last_centroids, CENTROIDS_BYTES, cudaHostAllocDefault));
+
   unsigned int i = 0;
   vector<Point<DATA_TYPE>*> usedPoints;
   Point<DATA_TYPE>* centroids[k];
   while (i < k) {
-    Point<DATA_TYPE>* p = points[random_int(rng)];
+    Point<DATA_TYPE>* p = points[random_int(*generator)];
     bool found = false;
     for (auto p1 : usedPoints) {
-      if ((*p1) == (*p)) { // FIXME Is it better use some min distance??
+      if ((*p1) == (*p)) {
         found = true;
         break;
       }
@@ -66,44 +106,14 @@ void Kmeans::init_centroids (Point<DATA_TYPE>** points) {
       #endif
     }
   }
+
   #if COMPUTE_DISTANCES_KERNEL >= 2
     for (size_t i = 0; i < k; ++i)
       h_centroids_matrix[i] = 1; // Static prefix
   #endif
+
+  memcpy(h_last_centroids, h_centroids, CENTROIDS_BYTES);
   CHECK_CUDA_ERROR(cudaMalloc(&d_centroids, CENTROIDS_BYTES));
-}
-
-Kmeans::Kmeans (const size_t _n, const uint32_t _d, const uint32_t _k, const float _tol, Point<DATA_TYPE>** _points, cudaDeviceProp* _deviceProps)
-    : n(_n), d(_d), k(_k), tol(_tol),
-    POINTS_BYTES(_n * _d * sizeof(DATA_TYPE)),
-    CENTROIDS_BYTES(_k * _d * sizeof(DATA_TYPE)),
-    points(_points),
-    deviceProps(_deviceProps) {
-
-  CHECK_CUDA_ERROR(cudaHostAlloc(&h_points, POINTS_BYTES, cudaHostAllocDefault));
-  for (size_t i = 0; i < n; ++i) {
-    for (size_t j = 0; j < d; ++j) {
-      h_points[i * d + j] = _points[i]->get(j);
-    }
-  }
-  CHECK_CUDA_ERROR(cudaMalloc(&d_points, POINTS_BYTES));
-  CHECK_CUDA_ERROR(cudaMemcpy(d_points, h_points, POINTS_BYTES, cudaMemcpyHostToDevice));
-
-  init_centroids(_points);
-  CHECK_CUDA_ERROR(cudaMemcpy(d_centroids, h_centroids, d * k * sizeof(DATA_TYPE), cudaMemcpyHostToDevice));
-}
-
-Kmeans::~Kmeans () {
-  CHECK_CUDA_ERROR(cudaFreeHost(h_points));
-  CHECK_CUDA_ERROR(cudaFreeHost(h_centroids));
-  CHECK_CUDA_ERROR(cudaFreeHost(h_last_centroids));
-  CHECK_CUDA_ERROR(cudaFreeHost(h_points_clusters));
-  CHECK_CUDA_ERROR(cudaFree(d_centroids));
-  CHECK_CUDA_ERROR(cudaFree(d_points));
-  if (h_centroids_matrix != NULL) {
-    CHECK_CUDA_ERROR(cudaFreeHost(h_centroids_matrix));
-  }
-  compute_gemm_distances_free();
 }
 
 uint64_t Kmeans::run (uint64_t maxiter) {
@@ -385,21 +395,4 @@ bool Kmeans::cmp_centroids () {
   }
 
   return true;
-}
-
-void Kmeans::to_csv(ostream& o, char separator) {
-  o << "cluster" << separator;
-  for (size_t i = 0; i < d; ++i) {
-    o << "d" << i;
-    if (i != (d - 1)) o << separator;
-  }
-  o << endl;
-  for (size_t i = 0; i < n; ++i) {
-    o << h_points_clusters[i] << separator;
-    for (size_t j = 0; j < d; ++j) {
-      o << setprecision(8) << h_points[i * d + j];
-      if (j != (d - 1)) o << separator;
-    }
-    o << endl;
-  }
 }

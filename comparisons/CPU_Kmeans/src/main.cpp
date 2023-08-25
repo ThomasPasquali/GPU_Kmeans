@@ -17,11 +17,14 @@
 #define ARG_OUTFILE     "out-file"
 #define ARG_INFILE      "in-file"
 #define ARG_TOL         "tolerance"
+#define ARG_RUNS        "runs"
+#define ARG_SEED        "seed"
 
-#define DEBUG_INPUT_DATA  1
+#define DEBUG_INPUT_DATA  0
 #define DEBUG_OUTPUT_INFO 1
 
 const float DEF_EPSILON = numeric_limits<float>::epsilon();
+const int   DEF_RUNS    = 1;
 
 using namespace std;
 
@@ -65,14 +68,17 @@ int main(int argc, char **argv) {
 
   options.add_options()
     ("h,help", "Print usage")
-    ("d," ARG_DIM,      "Number of dimensions of a point",  cxxopts::value<int>())
-    ("n," ARG_SAMPLES,  "Number of points",                 cxxopts::value<int>())
-    ("k," ARG_CLUSTERS, "Number of clusters",               cxxopts::value<int>())
-    ("m," ARG_MAXITER,  "Maximum number of iterations",     cxxopts::value<int>())
-    ("o," ARG_OUTFILE,  "Output filename",                  cxxopts::value<string>())
-    ("i," ARG_INFILE,   "Input filename",                   cxxopts::value<string>())
-    ("t," ARG_TOL,      "Tolerance of the difference in the cluster centers "\
-                        "of two consecutive iterations to declare convergence", cxxopts::value<float>()->default_value(to_string(DEF_EPSILON)));
+    ("d," ARG_DIM,      "Number of dimensions of a point",     cxxopts::value<int>())
+    ("n," ARG_SAMPLES,  "Number of points",                    cxxopts::value<int>())
+    ("k," ARG_CLUSTERS, "Number of clusters",                  cxxopts::value<int>())
+    ("m," ARG_MAXITER,  "Maximum number of iterations",        cxxopts::value<int>())
+    ("o," ARG_OUTFILE,  "Output filename",                     cxxopts::value<string>())
+    ("i," ARG_INFILE,   "Input filename",                      cxxopts::value<string>())
+    ("r," ARG_RUNS,     "Number of k-means runs",              cxxopts::value<int>()->default_value(to_string(DEF_RUNS)))
+    ("s," ARG_SEED,     "Seed for centroids generator",        cxxopts::value<int>())
+    ("t," ARG_TOL,      "Tolerance of the difference in the "\
+                        "cluster centers of two consecutive "\
+                        "iterations to declare convergence",   cxxopts::value<float>()->default_value(to_string(DEF_EPSILON)));
 
   args = options.parse(argc, argv);
 
@@ -87,9 +93,15 @@ int main(int argc, char **argv) {
   const size_t   maxiter  = getArg_u(ARG_MAXITER,  NULL);
   const string   out_file = getArg_s(ARG_OUTFILE,  NULL);
   const float    tol      = getArg_f(ARG_TOL,      &DEF_EPSILON);
+  const uint32_t runs     = getArg_u(ARG_RUNS,     &DEF_RUNS);
+
+  int *seed = NULL;
+  if (args[ARG_SEED].count() > 0) {
+    int in_seed = getArg_u(ARG_SEED, NULL);
+    seed = new int(in_seed);
+  }
 
   InputParser<DATA_TYPE>* input;
-
   if(args[ARG_INFILE].count() > 0) {
     const string in_file = getArg_s(ARG_INFILE, NULL);
     filebuf fb;
@@ -107,24 +119,31 @@ int main(int argc, char **argv) {
 
   if (DEBUG_INPUT_DATA) cout << "Points" << endl << *input << endl;
 
-  Kmeans kmeans(n, d, k, tol, input->get_dataset());
+  double tot_time = 0;
+  for (uint32_t i = 0; i < runs; i++) {
+    Kmeans kmeans(n, d, k, tol, seed, input->get_dataset());
+    const auto start = chrono::high_resolution_clock::now();
+    uint64_t converged = kmeans.run(maxiter);
+    const auto end = chrono::high_resolution_clock::now();
 
-  const auto start = chrono::high_resolution_clock::now();
-  uint64_t converged = kmeans.run(maxiter);
-  const auto end = chrono::high_resolution_clock::now();
-  const auto duration = chrono::duration_cast<chrono::duration<double>>(end - start);
+    const auto duration = chrono::duration_cast<chrono::duration<double>>(end - start);
+    tot_time += duration.count();
 
-  #if DEBUG_OUTPUT_INFO
-    if (converged < maxiter)
-      printf("K-means converged at iteration %lu\n", converged);
-    else
-      printf("K-means did NOT converge\n");
-    printf("Time: %lf\n", duration.count());
-  #endif
+    #if DEBUG_OUTPUT_INFO
+      if (converged < maxiter)
+        printf("K-means converged at iteration %lu\n", converged);
+      else
+        printf("K-means did NOT converge\n");
+      printf("Time: %lf\n", duration.count());
+    #endif
+  }
+
+  printf("CPU_Kmeans: %lfs (%u runs)\n", tot_time / runs, runs);
 
   ofstream fout(out_file);
-  kmeans.to_csv(fout);
+  input->dataset_to_csv(fout);
   fout.close();
+  delete seed;
 
   return 0;
 }

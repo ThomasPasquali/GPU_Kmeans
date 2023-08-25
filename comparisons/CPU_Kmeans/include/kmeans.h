@@ -1,6 +1,7 @@
 #ifndef __KMEANS__
 #define __KMEANS__
 
+#include <random>
 #include "point.hpp"
 
 #define DATA_TYPE float
@@ -13,6 +14,7 @@ class Kmeans {
     const uint64_t POINTS_BYTES;
     const uint64_t CENTROIDS_BYTES;
     Point<DATA_TYPE>** points;
+    mt19937* generator;
 
     DATA_TYPE* h_points;
     DATA_TYPE* h_centroids;
@@ -26,10 +28,9 @@ class Kmeans {
     bool cmp_centroids();
 
   public:
-    Kmeans(const size_t n, const uint32_t d, const uint32_t k, const float tol, Point<DATA_TYPE>** points);
+    Kmeans(const size_t n, const uint32_t d, const uint32_t k, const float tol, const int *seed, Point<DATA_TYPE>** points);
     ~Kmeans();
     uint64_t run(uint64_t maxiter);
-    void to_csv(ostream& o, char separator = ',');
 };
 
 #endif
