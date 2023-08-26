@@ -158,7 +158,7 @@ int main(int argc, char **argv) {
     #endif
   }
 
-  printf("GPU_Kmeans: %lfs (%u runs)\n", tot_time / runs, runs);
+  printf(BOLDBLUE "GPU_Kmeans: %lfs (%u runs)\n" RESET, tot_time / runs, runs);
 
   ofstream fout(out_file);
   input->dataset_to_csv(fout);

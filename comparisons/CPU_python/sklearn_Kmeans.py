@@ -10,21 +10,27 @@ argParser.add_argument("-k", "--clusters", help="The number of clusters", type=i
 argParser.add_argument("-m", "--maxiter", help="The maximun nuber of iterations", type=int, required=True)
 argParser.add_argument("-f", "--input-file", help="The CSV file to read from", type=str, required=False, default=None)
 argParser.add_argument("-o", "--out-filename", help="The file to write to", type=str, required=False, default=None)
-argParser.add_argument('-r', '--runs', type=int, required=False, default=1)
-argParser.add_argument('-s', '--seed', type=int, required=False, default=None)
+argParser.add_argument('-r', '--runs', help="Number of k-means runs", type=int, required=False, default=1)
+argParser.add_argument('-s', '--seed', help="Seed for centroids", type=int, required=False, default=None)
+argParser.add_argument('-t', '--tol', help="Tolerance for convergence", type=float, required=False, default=1e-4)
 args = argParser.parse_args()
 
 df = pd.read_csv(sys.stdin if args.input_file == None else args.input_file)
 if df.shape[1] > args.dimensions:
   df.drop(columns=df.columns[args.dimensions - df.shape[1]:], axis=1, inplace=True)
 
+kmeans = None
 total_elapsed = 0
 for i in range(args.runs):
   start = time.time()
-  kmeans = KMeans(n_clusters=args.clusters, random_state=args.seed, n_init="auto", max_iter=args.maxiter).fit(df)
+  kmeans = KMeans(n_clusters=args.clusters, random_state=args.seed, n_init="auto", tol=args.tol, max_iter=args.maxiter).fit(df)
   total_elapsed += time.time() - start
 
-print('sklearn kmeans: {0:.8f}s ({1} runs)'.format(total_elapsed / args.runs, args.runs))
+if kmeans.n_iter_ < args.maxiter:
+  print(f"K-means converged at iteration {kmeans.n_iter_}")
+else:
+  print("K-means did NOT converge")
+print(f'sklearn kmeans: {total_elapsed / args.runs}s ({args.runs} runs)')
 
 df['clusters'] = kmeans.labels_
 df = df[['clusters'] + [f"d{i}" for i in range(args.dimensions)]]

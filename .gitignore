@@ -2,6 +2,7 @@
 bin
 .vscode
 build
+datasets-unzipped
 
 ## FILES
 out/*/*.csv
