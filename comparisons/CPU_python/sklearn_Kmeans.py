@@ -11,6 +11,7 @@ argParser.add_argument("-m", "--maxiter", help="The maximun nuber of iterations"
 argParser.add_argument("-f", "--input-file", help="The CSV file to read from", type=str, required=False, default=None)
 argParser.add_argument("-o", "--out-filename", help="The file to write to", type=str, required=False, default=None)
 argParser.add_argument('-r', '--runs', type=int, required=False, default=1)
+argParser.add_argument('-s', '--seed', type=int, required=False, default=None)
 args = argParser.parse_args()
 
 df = pd.read_csv(sys.stdin if args.input_file == None else args.input_file)
@@ -20,7 +21,7 @@ if df.shape[1] > args.dimensions:
 total_elapsed = 0
 for i in range(args.runs):
   start = time.time()
-  kmeans = KMeans(n_clusters=args.clusters, random_state=0, n_init="auto", max_iter=args.maxiter).fit(df)
+  kmeans = KMeans(n_clusters=args.clusters, random_state=args.seed, n_init="auto", max_iter=args.maxiter).fit(df)
   total_elapsed += time.time() - start
 
 print('sklearn kmeans: {0:.8f}s ({1} runs)'.format(total_elapsed / args.runs, args.runs))

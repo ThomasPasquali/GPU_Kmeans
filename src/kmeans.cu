@@ -365,6 +365,11 @@ uint64_t Kmeans::run (uint64_t maxiter) {
   }
   /* MAIN LOOP END */
 
+  #if DEBUG_INIT_CENTROIDS
+    cout << endl << "Centroids" << endl;
+    printMatrixRowMaj(h_centroids, k, d);
+  #endif
+
   /* COPY BACK RESULTS*/
   CHECK_CUDA_ERROR(cudaMemcpy(h_points_clusters, d_points_clusters, n * sizeof(uint32_t), cudaMemcpyDeviceToHost));
   for (size_t i = 0; i < n; i++) {

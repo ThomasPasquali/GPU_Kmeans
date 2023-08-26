@@ -21,6 +21,7 @@ def normalize(x):
   return x * (max - min) + min
 
 df = None
+clusters = None
 # Clusterized points
 if args.n_clusters != None:
   # Generate centroids
@@ -37,9 +38,11 @@ if args.n_clusters != None:
 
   # Generate points close to centroids
   data = []
+  clusters = []
   for i in range(args.n_clusters):
     for j in range(clusters_len[i]):
       data.append([(centroids[i][k] - random.uniform(-RADIUS_CLUSTER, RADIUS_CLUSTER)) for k in range(args.dimensions)])
+      clusters.append(i)
 # Uniform random points range [min, max)
 elif args.min_value != None and args.max_value != None:
   data = torch.rand(args.n_samples, args.dimensions).numpy()
@@ -49,6 +52,7 @@ else:
   data = torch.randn(args.n_samples, args.dimensions).numpy()
 
 df = pd.DataFrame(data, columns=[f"d{i}" for i in range(args.dimensions)]).applymap( lambda x : round(x, ROUND_DIGITS))
+if clusters != None: df['k'] = clusters
 
 dirname = args.out_dir if args.out_dir != None else "."
 df.to_csv(f"{dirname}/N{args.n_samples}_D{args.dimensions}.csv", index=False)

@@ -68,17 +68,15 @@ int main(int argc, char **argv) {
 
   options.add_options()
     ("h,help", "Print usage")
-    ("d," ARG_DIM,      "Number of dimensions of a point",     cxxopts::value<int>())
-    ("n," ARG_SAMPLES,  "Number of points",                    cxxopts::value<int>())
-    ("k," ARG_CLUSTERS, "Number of clusters",                  cxxopts::value<int>())
-    ("m," ARG_MAXITER,  "Maximum number of iterations",        cxxopts::value<int>())
-    ("o," ARG_OUTFILE,  "Output filename",                     cxxopts::value<string>())
-    ("i," ARG_INFILE,   "Input filename",                      cxxopts::value<string>())
-    ("r," ARG_RUNS,     "Number of k-means runs",              cxxopts::value<int>()->default_value(to_string(DEF_RUNS)))
-    ("s," ARG_SEED,     "Seed for centroids generator",        cxxopts::value<int>())
-    ("t," ARG_TOL,      "Tolerance of the difference in the "\
-                        "cluster centers of two consecutive "\
-                        "iterations to declare convergence",   cxxopts::value<float>()->default_value(to_string(DEF_EPSILON)));
+    ("d," ARG_DIM,      "Number of dimensions of a point",  cxxopts::value<int>())
+    ("n," ARG_SAMPLES,  "Number of points",                 cxxopts::value<int>())
+    ("k," ARG_CLUSTERS, "Number of clusters",               cxxopts::value<int>())
+    ("m," ARG_MAXITER,  "Maximum number of iterations",     cxxopts::value<int>())
+    ("o," ARG_OUTFILE,  "Output filename",                  cxxopts::value<string>())
+    ("i," ARG_INFILE,   "Input filename",                   cxxopts::value<string>())
+    ("r," ARG_RUNS,     "Number of k-means runs",           cxxopts::value<int>()->default_value(to_string(DEF_RUNS)))
+    ("s," ARG_SEED,     "Seed for centroids generator",     cxxopts::value<int>())
+    ("t," ARG_TOL,      "Tolerance to declare convergence", cxxopts::value<float>()->default_value(to_string(DEF_EPSILON)));
 
   args = options.parse(argc, argv);
 

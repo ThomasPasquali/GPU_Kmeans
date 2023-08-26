@@ -50,7 +50,7 @@ The target `unit_kernels` is excluded from `ALL_TARGETS` therefore it has to be 
 ```bash
 cmake --build . --target unit_kernels
 ```
-Use the script `scripts/build_and_run_tests.sh` to build and run unit tests.
+Use the script `scripts/run_tests.sh` to build and run unit tests.
 
 ## Usage
 The executable `gpukmeans` reads inputs from `stdin`.
