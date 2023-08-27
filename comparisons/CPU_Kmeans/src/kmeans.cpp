@@ -71,9 +71,9 @@ void Kmeans::init_centroids () {
     }
   }
 
-  cout << endl << "Centroids" << endl;
-  for (i = 0; i < k; ++i)
-    cout << *(centroids[i]) << endl;
+  // cout << endl << "Centroids" << endl;
+  // for (i = 0; i < k; ++i)
+  //   cout << *(centroids[i]) << endl;
 
   for (size_t i = 0; i < k; ++i) {
     for (size_t j = 0; j < d; ++j) {

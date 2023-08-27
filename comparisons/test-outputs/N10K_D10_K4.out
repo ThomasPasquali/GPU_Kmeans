@@ -1,0 +1,56 @@
+
+============GPU============
+
+[1m[34mK-means converged at iteration 58
+Time: 0.013623
+[0m[1m[34mK-means converged at iteration 58
+Time: 0.013561
+[0m[1m[34mK-means converged at iteration 58
+Time: 0.013568
+[0m[1m[34mK-means converged at iteration 58
+Time: 0.013562
+[0m[1m[34mK-means converged at iteration 58
+Time: 0.013549
+[0m[1m[34mGPU_Kmeans: 0.013573s (5 runs)
+[0m
+==========GPU_MTX==========
+
+[1m[34mK-means converged at iteration 58
+Time: 26.164976
+[0m[1m[34mK-means converged at iteration 58
+Time: 24.348765
+[0m[1m[34mK-means converged at iteration 58
+Time: 24.339279
+[0m[1m[34mK-means converged at iteration 58
+Time: 24.337807
+[0m[1m[34mK-means converged at iteration 58
+Time: 24.349670
+[0m[1m[34mGPU_Kmeans: 24.708099s (5 runs)
+[0m
+============CPU============
+
+K-means converged at iteration 58
+Time: 0.128739
+K-means converged at iteration 58
+Time: 0.127404
+K-means converged at iteration 58
+Time: 0.127619
+K-means converged at iteration 58
+Time: 0.127316
+K-means converged at iteration 58
+Time: 0.127327
+CPU_Kmeans: 0.127681s (5 runs)
+
+==========PYTHON===========
+
+K-means converged at iteration 130
+Time: 0.07683038711547852
+K-means converged at iteration 130
+Time: 0.03682661056518555
+K-means converged at iteration 130
+Time: 0.035837650299072266
+K-means converged at iteration 130
+Time: 0.03558063507080078
+K-means converged at iteration 130
+Time: 0.03585052490234375
+sklearn kmeans: 0.04418516159057617s (5 runs)

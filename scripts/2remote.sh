@@ -6,7 +6,7 @@ JOB_OUT='kmeans'
 OUTPUT='res.csv'
 TOCOPY=( 'datasets' 'src' 'tests' 'CMakeLists.txt' "scripts/${BUILD_SCRIPT}" "scripts/${JOB_SCRIPT}" )
 
-if [[ $# < 2 ]]; then 
+if [[ $# < 2 ]]; then
   echo "Usage: 2remote.sh remote_user remote_folder"
   exit 1;
 fi
@@ -14,7 +14,7 @@ fi
 HOST="${1}@marzola.disi.unitn.it"
 WORKDIR="~/${2}"
 
-ssh $HOST "rm -f -r ${WORKDIR} && mkdir ${WORKDIR}"
+ssh $HOST "rm -f -r ${WORKDIR} && mkdir -p ${WORKDIR}"
 
 for FILE in ${TOCOPY[@]}; do
   scp -r ./$FILE $HOST:$WORKDIR/
