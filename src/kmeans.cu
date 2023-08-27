@@ -276,7 +276,6 @@ uint64_t Kmeans::run (uint64_t maxiter) {
 
     ///////////////////////////////////////////* COMPUTE NEW CENTROIDS *///////////////////////////////////////////
 
-    CHECK_CUDA_ERROR(cudaMemset(h_centroids, 0, k * d * sizeof(DATA_TYPE)));
     CHECK_CUDA_ERROR(cudaMemset(d_centroids, 0, k * d * sizeof(DATA_TYPE)));
 
     #if PERFORMANCES_KERNEL_CENTROIDS
@@ -303,6 +302,7 @@ uint64_t Kmeans::run (uint64_t maxiter) {
     #endif
 
     #if DEBUG_KERNEL_CENTROIDS
+      CHECK_CUDA_ERROR(cudaMemset(h_centroids, 0, k * d * sizeof(DATA_TYPE)));
       uint32_t* h_clusters_len;
       CHECK_CUDA_ERROR(cudaMallocHost(&h_clusters_len, k * sizeof(uint32_t)));
       CHECK_CUDA_ERROR(cudaMemcpy(h_points_clusters, d_points_clusters, n * sizeof(uint32_t), cudaMemcpyDeviceToHost));
@@ -372,6 +372,7 @@ uint64_t Kmeans::run (uint64_t maxiter) {
 
   /* COPY BACK RESULTS*/
   CHECK_CUDA_ERROR(cudaMemcpy(h_points_clusters, d_points_clusters, n * sizeof(uint32_t), cudaMemcpyDeviceToHost));
+  CHECK_CUDA_ERROR(cudaDeviceSynchronize());
   for (size_t i = 0; i < n; i++) {
     points[i]->setCluster(h_points_clusters[i]);
   }
