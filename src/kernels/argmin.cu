@@ -25,6 +25,17 @@ __device__ Pair warp_argmin (float a) {
   return t;
 }
 
+/**
+ * @brief This kernel reduces each block (one per point) to find the closest centroid (min dist.) and writes back the centroid index incrementing the cluster length
+ * 
+ * @param n 
+ * @param k 
+ * @param d_distances 
+ * @param points_clusters point-cluster associations
+ * @param clusters_len length of clusters
+ * @param warps_per_block used to avoid useless compoutations
+ * @param infty max value for DATA_TYPE
+ */
 __global__ void clusters_argmin_shfl(const uint32_t n, const uint32_t k, DATA_TYPE* d_distances, uint32_t* points_clusters,  uint32_t* clusters_len, uint32_t warps_per_block, DATA_TYPE infty) {
   const uint32_t warpSizeLog2 = sizeof(uint32_t) * CHAR_BIT - clz(warpSize) - 1;
   extern __shared__ Pair shrd[];
@@ -60,6 +71,16 @@ __global__ void clusters_argmin_shfl(const uint32_t n, const uint32_t k, DATA_TY
   }
 }
 
+/**
+ * @brief This function uses the library CUB to perform the argmin for each point/centers
+ * 
+ * @param d_distances 
+ * @param n 
+ * @param k 
+ * @param h_points_clusters indicates the cluster of each point
+ * @param d_points_clusters 
+ * @param h_clusters_len indicates how many point belog to each cluster
+ */
 void clusters_argmin_cub(const DATA_TYPE* d_distances, const uint32_t n, const uint32_t k, uint32_t* h_points_clusters, uint32_t* d_points_clusters, uint64_t* h_clusters_len) {
   memset(h_clusters_len, 0, k * sizeof(uint64_t));
   for (size_t i = 0; i < n; i++) {
