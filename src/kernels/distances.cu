@@ -3,7 +3,7 @@
 #include <stdio.h>
 
 #include "kernels.cuh"
-#include "../utils.cuh"
+#include "../cuda_utils.cuh"
 #include "../kmeans.cuh"
 
 #define DEBUG_GEMM 0
@@ -12,10 +12,10 @@
 
 /**
  * @brief This kernel will use exactly one warp to compute the distance between a point and a centroid thus is bounded to d <= 32. It uses shuffle to perform the reduction.
- * 
+ *
  * @param distances distances will be written here
- * @param centroids 
- * @param points 
+ * @param centroids
+ * @param points
  * @param d_closest_2_pow passed as parameter to avoid useless computations
  * @param round used if d > 32 to handle multiple warp per point
  */
@@ -27,7 +27,7 @@ __global__ void compute_distances_one_point_per_warp(DATA_TYPE* distances, const
   if (d_offset < d) {
     DATA_TYPE dist = points[point_offset] - centroids[center_offset];
     dist *= dist;
-    
+
     for (int i = (min(warpSize, d_closest_2_pow) >> 1); i > 0; i >>= 1) {
       dist += __shfl_down_sync(DISTANCES_SHFL_MASK, dist, i);
     }
@@ -44,13 +44,13 @@ __global__ void compute_distances_one_point_per_warp(DATA_TYPE* distances, const
 
 /**
  * @brief This kernel fits as many points in one warp as possible, bounded to d <= 32. It uses shuffle to perform the reduction: similar to compute_distances_one_point_per_warp.
- * 
+ *
  * @param distances distances will be written here
- * @param centroids 
- * @param points 
- * @param points_n 
+ * @param centroids
+ * @param points
+ * @param points_n
  * @param points_per_warp passed as parameter to avoid useless computations
- * @param d 
+ * @param d
  * @param d_closest_2_pow_log2 passed as parameter to avoid useless computations
  */
 __global__ void compute_distances_shfl(DATA_TYPE* distances, const DATA_TYPE* centroids, const DATA_TYPE* points, const uint32_t points_n, const uint32_t points_per_warp, const uint32_t d, const uint32_t d_closest_2_pow_log2) {
@@ -62,10 +62,10 @@ __global__ void compute_distances_shfl(DATA_TYPE* distances, const DATA_TYPE* ce
     DATA_TYPE dist = points[point_i * d + d_i] - centroids[center_i * d + d_i];
     dist *= dist;
 
-    for (int i = (0b1 << (d_closest_2_pow_log2 - 1)); i > 0; i >>= 1) {      
+    for (int i = (0b1 << (d_closest_2_pow_log2 - 1)); i > 0; i >>= 1) {
       dist += __shfl_down_sync(DISTANCES_SHFL_MASK, dist, i);
     }
-    
+
     if (d_i == 0) {
       distances[(point_i * gridDim.y) + center_i] = dist;
     }
@@ -99,7 +99,7 @@ void schedule_distances_kernel(const cudaDeviceProp *props, const uint32_t n, co
  *
  * @param points in ROW major order
  * @param associated_matrices the associated matrices will be written here
- * @param d 
+ * @param d
  * @param round to handle d > 32
  */
 __global__ void compute_point_associated_matrices (const DATA_TYPE* points, DATA_TYPE* associated_matrices, const uint32_t d, const uint32_t round) {
@@ -109,7 +109,7 @@ __global__ void compute_point_associated_matrices (const DATA_TYPE* points, DATA
   const uint32_t d_i1 = d_i + 1;
 
   // If dim in the thread is greater than d, then return to avoid illegal writes
-  if (d_i >= d) { return; } 
+  if (d_i >= d) { return; }
 
   DATA_TYPE c = points[p_i * d + d_i];
   DATA_TYPE c_11 = c * c;
@@ -135,11 +135,11 @@ uint32_t d_tmp_dim = 0;
 uint32_t last_nk = 0;
 /**
  * @brief Computes and writes to d_distances the distance of each point-center (row-major, in this order)
- * 
- * @param handle 
- * @param d1 
- * @param n 
- * @param k 
+ *
+ * @param handle
+ * @param d1
+ * @param n
+ * @param k
  * @param d_P the points associated matrices (n * d1d1)
  * @param d_C the matrix of centers (prefixed with 1s)
  * @param d_distances size: n * k
@@ -175,7 +175,7 @@ void compute_gemm_distances (cublasHandle_t& handle, const uint32_t d1, const ui
       delete[] tmp_debug1;
       printf("\n");
     #endif
-    
+
     CHECK_CUBLAS_ERROR(cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, // c * P
                                     k, d1, d1, &alpha,
                                     d_C, k,
@@ -196,8 +196,8 @@ void compute_gemm_distances (cublasHandle_t& handle, const uint32_t d1, const ui
                                     d_tmp, k,
                                     d_C, k,
                                     &beta, d_tmp, k));
-    
-    
+
+
     for (size_t i = 0; i < k; i++) {
       CHECK_CUBLAS_ERROR(cublasGetMatrix(k, k, sizeof(DATA_TYPE), d_tmp, k, h_tmp, k));
       h_distances[p_i * k + i] = h_tmp[IDX2C(i, i, k)];

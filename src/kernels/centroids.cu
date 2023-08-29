@@ -1,5 +1,5 @@
 #include "kernels.cuh"
-#include "../utils.cuh"
+#include "../cuda_utils.cuh"
 
 __global__ void compute_centroids_shfl(DATA_TYPE* centroids, const DATA_TYPE* points, const uint32_t* points_clusters, const uint32_t* clusters_len, const uint64_t n, const uint32_t d, const uint32_t k, const uint32_t round) {
   const uint32_t block_base = round * warpSize;  // Get in which block of d the kernel works (0 <= d < 32 => block_base = 0; 32 <= d < 64 => block_base = 32; ...)

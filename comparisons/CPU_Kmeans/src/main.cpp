@@ -6,7 +6,7 @@
 
 #include "../include/kmeans.h"
 
-#define DEBUG_INPUT_DATA  1
+#define DEBUG_INPUT_DATA  0
 #define DEBUG_OUTPUT_INFO 1
 
 using namespace std;
@@ -21,7 +21,9 @@ int main(int argc, char **argv) {
 
   parse_input_args(argc, argv, &d, &n, &k, &maxiter, out_file, &tol, &runs, &seed, &input);
 
-  if (DEBUG_INPUT_DATA) cout << "Points" << endl << *input << endl;
+  #if DEBUG_INPUT_DATA
+    cout << "Points" << endl << *input << endl;
+  #endif
 
   printf(BOLDMAGENTA);
   double tot_time = 0;
@@ -34,13 +36,13 @@ int main(int argc, char **argv) {
     const auto duration = chrono::duration_cast<chrono::duration<double>>(end - start);
     tot_time += duration.count();
 
-    if (DEBUG_OUTPUT_INFO) {
+    #if DEBUG_OUTPUT_INFO
       if (converged < maxiter)
         printf("K-means converged at iteration %lu - ", converged);
       else
         printf("K-means did NOT converge - \n");
       printf("Time: %lf\n", duration.count());
-    }
+    #endif
   }
 
   printf("CPU_Kmeans: %lfs (%u runs)\n", tot_time / runs, runs);

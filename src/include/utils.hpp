@@ -5,13 +5,12 @@
 #include <string>
 #include <fstream>
 
-#include <cxxopts.hpp>
-#include <input_parser.hpp>
+#include "cxxopts.hpp"
+#include "input_parser.hpp"
 
 #ifndef DATA_TYPE
   #define DATA_TYPE float
 #endif
-
 
 #define ARG_DIM         "n-dimensions"
 #define ARG_SAMPLES     "n-samples"

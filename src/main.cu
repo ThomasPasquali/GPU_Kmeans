@@ -1,124 +1,30 @@
-#include <stdio.h>
-#include <vector>
-#include <algorithm>
-#include <string>
-#include <fstream>
-#include <limits>
 #include <chrono>
 
 #include "include/common.h"
 #include "include/colors.h"
-#include "include/cxxopts.hpp"
 #include "include/input_parser.hpp"
-#include "include/errors.hpp"
-#include "utils.cuh"
+#include "include/utils.hpp"
+
 #include "kmeans.cuh"
+#include "cuda_utils.cuh"
 
-#define DEVICE          0
-#define ARG_DIM         "n-dimensions"
-#define ARG_SAMPLES     "n-samples"
-#define ARG_CLUSTERS    "n-clusters"
-#define ARG_MAXITER     "maxiter"
-#define ARG_OUTFILE     "out-file"
-#define ARG_INFILE      "in-file"
-#define ARG_TOL         "tolerance"
-#define ARG_RUNS        "runs"
-#define ARG_SEED        "seed"
-
-const char* ARG_STR[]   = {"dimensions", "n-samples", "clusters", "maxiter", "out-file", "in-file", "tolerance"};
-const float DEF_EPSILON = numeric_limits<float>::epsilon();
-const int   DEF_RUNS    = 1;
+#define DEVICE 0
 
 using namespace std;
 
-cxxopts::ParseResult args;
-int getArg_u (const char *arg, const int *def_val) {
-  try {
-    return args[arg].as<int>();
-  } catch(...) {
-    if (def_val) { return *def_val; }
-    printErrDesc(EXIT_ARGS);
-    cerr << arg << endl;
-    exit(EXIT_ARGS);
-  }
-}
-
-float getArg_f (const char *arg, const float *def_val) {
-  try {
-    return args[arg].as<float>();
-  } catch(...) {
-    if (def_val) { return *def_val; }
-    printErrDesc(EXIT_ARGS);
-    cerr << arg << endl;
-    exit(EXIT_ARGS);
-  }
-}
-
-string getArg_s (const char *arg, const string *def_val) {
-  try {
-    return args[arg].as<string>();
-  } catch(...) {
-    if (def_val) { return *def_val; }
-    printErrDesc(EXIT_ARGS);
-    cerr << arg << endl;
-    exit(EXIT_ARGS);
-  }
-}
-
 int main(int argc, char **argv) {
-  // Read input args
-  cxxopts::Options options("gpukmeans", "gpukmeans is an implementation of the K-means algorithm that uses a GPU");
+  uint32_t d, k, runs;
+  size_t   n, maxiter;
+  string   out_file;
+  float    tol;
+  int     *seed = NULL;
+  InputParser<float> *input = NULL;
 
-  options.add_options()
-    ("h,help", "Print usage")
-    ("d," ARG_DIM,      "Number of dimensions of a point",  cxxopts::value<int>())
-    ("n," ARG_SAMPLES,  "Number of points",                 cxxopts::value<int>())
-    ("k," ARG_CLUSTERS, "Number of clusters",               cxxopts::value<int>())
-    ("m," ARG_MAXITER,  "Maximum number of iterations",     cxxopts::value<int>())
-    ("o," ARG_OUTFILE,  "Output filename",                  cxxopts::value<string>())
-    ("i," ARG_INFILE,   "Input filename",                   cxxopts::value<string>())
-    ("r," ARG_RUNS,     "Number of k-means runs",           cxxopts::value<int>()->default_value(to_string(DEF_RUNS)))
-    ("s," ARG_SEED,     "Seed for centroids generator",     cxxopts::value<int>())
-    ("t," ARG_TOL,      "Tolerance to declare convergence", cxxopts::value<float>()->default_value(to_string(DEF_EPSILON)));
+  parse_input_args(argc, argv, &d, &n, &k, &maxiter, out_file, &tol, &runs, &seed, &input);
 
-  args = options.parse(argc, argv);
-
-  if (args.count("help")) {
-    cout << options.help() << endl;
-    exit(0);
-  }
-
-  const uint32_t d        = getArg_u(ARG_DIM,      NULL);
-  const size_t   n        = getArg_u(ARG_SAMPLES,  NULL);
-  const uint32_t k        = getArg_u(ARG_CLUSTERS, NULL);
-  const size_t   maxiter  = getArg_u(ARG_MAXITER,  NULL);
-  const string   out_file = getArg_s(ARG_OUTFILE,  NULL);
-  const float    tol      = getArg_f(ARG_TOL,      &DEF_EPSILON);
-  const uint32_t runs     = getArg_u(ARG_RUNS,     &DEF_RUNS);
-
-  int *seed = NULL;
-  if (args[ARG_SEED].count() > 0) {
-    int in_seed = getArg_u(ARG_SEED, NULL);
-    seed = new int(in_seed);
-  }
-
-  InputParser<DATA_TYPE>* input;
-  if(args[ARG_INFILE].count() > 0) {
-    const string in_file = getArg_s(ARG_INFILE, NULL);
-    filebuf fb;
-    if (fb.open(in_file, ios::in)) {
-      istream file(&fb);
-      input = new InputParser<DATA_TYPE>(file, d, n);
-      fb.close();
-    } else {
-      printErrDesc(EXIT_INVALID_INFILE);
-      exit(EXIT_INVALID_INFILE);
-    }
-  } else {
-    input = new InputParser<DATA_TYPE>(cin, d, n);
-  }
-
-  if (DEBUG_INPUT_DATA) cout << "Points" << endl << *input << endl;
+  #if DEBUG_INPUT_DATA
+    cout << "Points" << endl << *input << endl;
+  #endif
 
   // Check devices
   int deviceCount = 0;
@@ -139,6 +45,7 @@ int main(int argc, char **argv) {
   getDeviceProps(DEVICE, &deviceProp);
   if (DEBUG_DEVICE) describeDevice(DEVICE, deviceProp);
 
+  printf(BOLDBLUE);
   double tot_time = 0;
   for (uint32_t i = 0; i < runs; i++) {
     Kmeans kmeans(n, d, k, tol, seed, input->get_dataset(), &deviceProp);
@@ -151,14 +58,15 @@ int main(int argc, char **argv) {
 
     #if DEBUG_OUTPUT_INFO
       if (converged < maxiter)
-        printf(BOLDBLUE "K-means converged at iteration %lu\n", converged);
+        printf("K-means converged at iteration %lu - ", converged);
       else
-        printf(BOLDBLUE "K-means did NOT converge\n");
-      printf("Time: %lf\n" RESET, duration.count());
+        printf("K-means did NOT converge - ");
+      printf("Time: %lf\n", duration.count());
     #endif
   }
 
-  printf(BOLDBLUE "GPU_Kmeans: %lfs (%u runs)\n" RESET, tot_time / runs, runs);
+  printf("GPU_Kmeans: %lfs (%u runs)\n", tot_time / runs, runs);
+  printf(RESET);
 
   ofstream fout(out_file);
   input->dataset_to_csv(fout);

@@ -8,7 +8,7 @@
 #include "include/common.h"
 #include "include/colors.h"
 
-#include "utils.cuh"
+#include "cuda_utils.cuh"
 #include "kmeans.cuh"
 
 #include "kernels/kernels.cuh"

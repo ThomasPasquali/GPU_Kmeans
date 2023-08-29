@@ -1,7 +1,7 @@
 #include <bits/stdc++.h>
 #include <cub/cub.cuh>
 #include "kernels.cuh"
-#include "../utils.cuh"
+#include "../cuda_utils.cuh"
 #include "../include/colors.h"
 
 __device__ Pair shfl_xor_sync (Pair p, unsigned delta){
@@ -27,10 +27,10 @@ __device__ Pair warp_argmin (float a) {
 
 /**
  * @brief This kernel reduces each block (one per point) to find the closest centroid (min dist.) and writes back the centroid index incrementing the cluster length
- * 
- * @param n 
- * @param k 
- * @param d_distances 
+ *
+ * @param n
+ * @param k
+ * @param d_distances
  * @param points_clusters point-cluster associations
  * @param clusters_len length of clusters
  * @param warps_per_block used to avoid useless compoutations
@@ -51,7 +51,7 @@ __global__ void clusters_argmin_shfl(const uint32_t n, const uint32_t k, DATA_TY
     p.i += wid << warpSizeLog2; // Remap p.i
     shrd[wid] = p;
   }
-  
+
   __syncthreads();
 
 
@@ -73,12 +73,12 @@ __global__ void clusters_argmin_shfl(const uint32_t n, const uint32_t k, DATA_TY
 
 /**
  * @brief This function uses the library CUB to perform the argmin for each point/centers
- * 
- * @param d_distances 
- * @param n 
- * @param k 
+ *
+ * @param d_distances
+ * @param n
+ * @param k
  * @param h_points_clusters indicates the cluster of each point
- * @param d_points_clusters 
+ * @param d_points_clusters
  * @param h_clusters_len indicates how many point belog to each cluster
  */
 void clusters_argmin_cub(const DATA_TYPE* d_distances, const uint32_t n, const uint32_t k, uint32_t* h_points_clusters, uint32_t* d_points_clusters, uint64_t* h_clusters_len) {
@@ -90,7 +90,7 @@ void clusters_argmin_cub(const DATA_TYPE* d_distances, const uint32_t n, const u
     void *d_temp_storage = NULL; size_t temp_storage_bytes = 0;
     cub::DeviceReduce::ArgMin(d_temp_storage, temp_storage_bytes, d_distances, d_argmin, k);
     CHECK_CUDA_ERROR(cudaMalloc(&d_temp_storage, temp_storage_bytes));
-    
+
     // Run argmin-reduction
     cub::DeviceReduce::ArgMin(d_temp_storage, temp_storage_bytes, d_distances + i * k, d_argmin, k);
 
@@ -111,7 +111,7 @@ void clusters_argmin_cub(const DATA_TYPE* d_distances, const uint32_t n, const u
 void schedule_argmin_kernel(const cudaDeviceProp *props, const uint32_t n, const uint32_t k, dim3 *grid, dim3 *block, uint32_t *warps_per_block, uint32_t *sh_mem) {
   dim3 argmin_grid_dim(n);
   dim3 argmin_block_dim(max(next_pow_2(k), props->warpSize));
-  
+
   *grid   = argmin_grid_dim;
   *block  = argmin_block_dim;
   *warps_per_block = (k + props->warpSize - 1) / props->warpSize; // Ceil

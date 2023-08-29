@@ -2,7 +2,7 @@
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
 
-#include "utils.cuh"
+#include "cuda_utils.cuh"
 #include "include/common.h"
 
 using namespace std;
@@ -48,7 +48,7 @@ void describeDevice (int dev, cudaDeviceProp& deviceProp) {
           runtimeVersion / 1000, (runtimeVersion % 100) / 10);
   printf("  CUDA Capability Major/Minor version number:    %d.%d\n",
           deviceProp.major, deviceProp.minor);
-  
+
   char msg[256];
   snprintf(msg, sizeof(msg),
              "  Total amount of global memory:                 %.0f MBytes "
