@@ -1,3 +1,6 @@
 [submodule "comparisons/GPU_CUDA/kmcuda"]
 	path = comparisons/GPU_CUDA/kmcuda
 	url = https://github.com/src-d/kmcuda.git
+[submodule "comparisons/GPU_python/kmeans_pytorch"]
+	path = comparisons/GPU_python/kmeans_pytorch
+	url = https://github.com/subhadarship/kmeans_pytorch.git

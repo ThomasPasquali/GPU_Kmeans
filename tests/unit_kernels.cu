@@ -6,7 +6,7 @@
 #include <cublas_v2.h>
 
 #include "../src/kernels/kernels.cuh"
-#include "../src/utils.cuh"
+#include "../src/cuda_utils.cuh"
 #include "../src/include/common.h"
 
 #define TEST_DEBUG 0
