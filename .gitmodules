@@ -1,0 +1,3 @@
+[submodule "comparisons/GPU_CUDA/kmcuda"]
+	path = comparisons/GPU_CUDA/kmcuda
+	url = https://github.com/src-d/kmcuda.git
