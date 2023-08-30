@@ -1,0 +1,97 @@
+############## GPU-KMEANS ##############
+Test N=100 D=2 K=10 INPUT=N100_D2.csv MAXITER=500 TOL=0.00001 SEED=0
+K-means converged at iteration 5 - Time: 0.000248
+K-means converged at iteration 5 - Time: 0.000217
+K-means converged at iteration 5 - Time: 0.000216
+K-means converged at iteration 5 - Time: 0.000238
+K-means converged at iteration 5 - Time: 0.000207
+GPU_Kmeans: 0.000225s (5 runs)
+
+Test N=100 D=3 K=10 INPUT=N100_D3.csv MAXITER=500 TOL=0.00001 SEED=0
+K-means converged at iteration 5 - Time: 0.000240
+K-means converged at iteration 5 - Time: 0.000213
+K-means converged at iteration 5 - Time: 0.000219
+K-means converged at iteration 5 - Time: 0.000191
+K-means converged at iteration 5 - Time: 0.000192
+GPU_Kmeans: 0.000211s (5 runs)
+
+Test N=100 D=10 K=10 INPUT=N100_D10.csv MAXITER=500 TOL=0.00001 SEED=0
+K-means converged at iteration 4 - Time: 0.000205
+K-means converged at iteration 4 - Time: 0.000171
+K-means converged at iteration 4 - Time: 0.000158
+K-means converged at iteration 4 - Time: 0.000159
+K-means converged at iteration 4 - Time: 0.000154
+GPU_Kmeans: 0.000170s (5 runs)
+
+Test N=100 D=35 K=10 INPUT=N100_D35.csv MAXITER=500 TOL=0.00001 SEED=0
+K-means converged at iteration 5 - Time: 0.000277
+K-means converged at iteration 5 - Time: 0.000244
+K-means converged at iteration 5 - Time: 0.000243
+K-means converged at iteration 5 - Time: 0.000266
+K-means converged at iteration 5 - Time: 0.000255
+GPU_Kmeans: 0.000257s (5 runs)
+
+Test N=100 D=256 K=10 INPUT=N100_D256.csv MAXITER=500 TOL=0.00001 SEED=0
+K-means converged at iteration 2 - Time: 0.000310
+K-means converged at iteration 2 - Time: 0.000278
+K-means converged at iteration 2 - Time: 0.000277
+K-means converged at iteration 2 - Time: 0.000279
+K-means converged at iteration 2 - Time: 0.000274
+GPU_Kmeans: 0.000284s (5 runs)
+
+Test N=1000 D=2 K=100 INPUT=N1000_D2.csv MAXITER=500 TOL=0.00001 SEED=0
+K-means converged at iteration 12 - Time: 0.000822
+K-means converged at iteration 12 - Time: 0.000800
+K-means converged at iteration 12 - Time: 0.000789
+K-means converged at iteration 12 - Time: 0.000790
+K-means converged at iteration 12 - Time: 0.000767
+GPU_Kmeans: 0.000793s (5 runs)
+
+Test N=1000 D=3 K=100 INPUT=N1000_D3.csv MAXITER=500 TOL=0.00001 SEED=0
+K-means converged at iteration 12 - Time: 0.001141
+K-means converged at iteration 12 - Time: 0.001109
+K-means converged at iteration 12 - Time: 0.001086
+K-means converged at iteration 12 - Time: 0.001112
+K-means converged at iteration 12 - Time: 0.001088
+GPU_Kmeans: 0.001107s (5 runs)
+
+Test N=1000 D=10 K=100 INPUT=N1000_D10.csv MAXITER=500 TOL=0.00001 SEED=0
+K-means converged at iteration 14 - Time: 0.003512
+K-means converged at iteration 14 - Time: 0.003434
+K-means converged at iteration 14 - Time: 0.003469
+K-means converged at iteration 14 - Time: 0.003486
+K-means converged at iteration 14 - Time: 0.003441
+GPU_Kmeans: 0.003468s (5 runs)
+
+Test N=1000 D=35 K=100 INPUT=N1000_D35.csv MAXITER=500 TOL=0.00001 SEED=0
+K-means converged at iteration 11 - Time: 0.010257
+K-means converged at iteration 11 - Time: 0.010214
+K-means converged at iteration 11 - Time: 0.010221
+K-means converged at iteration 11 - Time: 0.010220
+K-means converged at iteration 11 - Time: 0.010210
+GPU_Kmeans: 0.010225s (5 runs)
+
+Test N=1000 D=256 K=100 INPUT=N1000_D256.csv MAXITER=500 TOL=0.00001 SEED=0
+K-means converged at iteration 6 - Time: 0.023036
+K-means converged at iteration 6 - Time: 0.022891
+K-means converged at iteration 6 - Time: 0.022885
+K-means converged at iteration 6 - Time: 0.022895
+K-means converged at iteration 6 - Time: 0.022889
+GPU_Kmeans: 0.022919s (5 runs)
+
+Test N=100000 D=2 K=10000 INPUT=N100K_D2.csv MAXITER=500 TOL=0.00001 SEED=0
+K-means converged at iteration 6 - Time: 7.099660
+K-means converged at iteration 2 - Time: 2.372140
+K-means converged at iteration 9 - Time: 10.622098
+K-means converged at iteration 11 - Time: 12.980344
+K-means converged at iteration 4 - Time: 4.727874
+GPU_Kmeans: 7.560423s (5 runs)
+
+Test N=100000 D=2 K=10000 INPUT=N100K_D2.csv MAXITER=500 TOL=0.00001 SEED=0
+K-means converged at iteration 3 - Time: 3.566206
+K-means converged at iteration 11 - Time: 12.974281
+K-means converged at iteration 30 - Time: 35.369044
+K-means converged at iteration 11 - Time: 12.969251
+K-means converged at iteration 9 - Time: 10.614994
+GPU_Kmeans: 15.098755s (5 runs)
+

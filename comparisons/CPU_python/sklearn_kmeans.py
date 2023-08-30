@@ -36,13 +36,13 @@ for i in range(args.runs):
 
 print(f'sklearn kmeans: {total_elapsed / args.runs}s ({args.runs} runs)')
 
-df['clusters'] = kmeans.labels_
-df = df[['clusters'] + [f"d{i}" for i in range(args.dimensions)]]
+# df['clusters'] = kmeans.labels_
+# df = df[['clusters'] + [f"d{i}" for i in range(args.dimensions)]]
 
-if args.out_filename == None:
-  from io import StringIO
-  output = StringIO()
-  df.to_csv(output, index=False)
-  print(output.getvalue())
-else:
-  df.to_csv(args.out_filename, index=False)
+# if args.out_filename == None:
+#   from io import StringIO
+#   output = StringIO()
+#   df.to_csv(output, index=False)
+#   print(output.getvalue())
+# else:
+#   df.to_csv(args.out_filename, index=False)
