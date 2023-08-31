@@ -31,7 +31,7 @@ for SAMPLE in ${SAMPLES[@]}; do
   DATA_DIR="${DATA_PATH}${DATASETS[${S_IDX}]}/${DATASETS[${S_IDX}]}" && ((S_IDX += 1))
   for FEATURE in ${FEATURES[@]}; do
     INPUT="${DATA_DIR}_D${FEATURE}.csv"
-    K=$(( SAMPLE / 10 ))
+    #K=$(( SAMPLE / 10 ))
     echo "Test N=${SAMPLE} D=${FEATURE} K=${K} INPUT=$(basename "${INPUT}") MAXITER=${MAX_ITER} TOL=${TOL} SEED=${SEED}"
     eval "${CMD} -d ${FEATURE} -n ${SAMPLE} -k ${K} -m ${MAX_ITER} -o ${OUT} -i ${INPUT} -t ${TOL} -s ${SEED} -r ${RUNS}"
     echo ""

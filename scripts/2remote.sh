@@ -55,7 +55,7 @@ WORKDIR="~/comparisons/"
 
 ######## SKLEARN PYTHON ########
 # SRC_DIR="./comparisons/CPU_python/"
-# REMOTE_DIR="${WORKDIR}sklearn_Kmeans"
+# REMOTE_DIR="${WORKDIR}sklearn_kmeans"
 # EXEC="sklearn_kmeans.py"
 # TOCOPY=( 'requirements.txt' "${EXEC}" )
 

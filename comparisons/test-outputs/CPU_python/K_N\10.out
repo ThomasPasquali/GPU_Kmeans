@@ -79,23 +79,68 @@ K-means converged at iteration 5 - Time: 0.01690530776977539
 K-means converged at iteration 5 - Time: 0.016883373260498047
 sklearn kmeans: 0.02283306121826172s (5 runs)
 
-Test N=100000 D=2 K=10000 INPUT=N100K_D2.csv MAXITER=500 TOL=0.00001 SEED=0
-K-means converged at iteration 32 - Time: 89.98329615592957
-sklearn kmeans: 89.98329615592957s (1 runs)
+Test N=10000 D=2 K=1000 INPUT=N100K_D2.csv MAXITER=500 TOL=0.00001 SEED=0
+K-means converged at iteration 30 - Time: 0.6795365810394287
+K-means converged at iteration 30 - Time: 0.650733470916748
+K-means converged at iteration 30 - Time: 0.6413629055023193
+K-means converged at iteration 30 - Time: 0.6497015953063965
+K-means converged at iteration 30 - Time: 0.6445090770721436
+sklearn kmeans: 0.6531687259674073s (5 runs)
 
-Test N=100000 D=3 K=10000 INPUT=N100K_D3.csv MAXITER=500 TOL=0.00001 SEED=0
-K-means converged at iteration 23 - Time: 61.965431690216064
-sklearn kmeans: 61.965431690216064s (1 runs)
+Test N=10000 D=3 K=1000 INPUT=N100K_D3.csv MAXITER=500 TOL=0.00001 SEED=0
+K-means converged at iteration 16 - Time: 0.34052133560180664
+K-means converged at iteration 16 - Time: 0.3252296447753906
+K-means converged at iteration 16 - Time: 0.3252980709075928
+K-means converged at iteration 16 - Time: 0.3244655132293701
+K-means converged at iteration 16 - Time: 0.32291293144226074
+sklearn kmeans: 0.3276854991912842s (5 runs)
 
-Test N=100000 D=10 K=10000 INPUT=N100K_D10.csv MAXITER=500 TOL=0.00001 SEED=0
-K-means converged at iteration 26 - Time: 86.28634405136108
-sklearn kmeans: 86.28634405136108s (1 runs)
+Test N=10000 D=10 K=1000 INPUT=N100K_D10.csv MAXITER=500 TOL=0.00001 SEED=0
+K-means converged at iteration 16 - Time: 0.37345385551452637
+K-means converged at iteration 16 - Time: 0.35781311988830566
+K-means converged at iteration 16 - Time: 0.3542203903198242
+K-means converged at iteration 16 - Time: 0.3525874614715576
+K-means converged at iteration 16 - Time: 0.35371947288513184
+sklearn kmeans: 0.35835886001586914s (5 runs)
 
-Test N=100000 D=35 K=10000 INPUT=N100K_D35.csv MAXITER=500 TOL=0.00001 SEED=0
-K-means converged at iteration 18 - Time: 76.83675074577332
-sklearn kmeans: 76.83675074577332s (1 runs)
+Test N=10000 D=35 K=1000 INPUT=N100K_D35.csv MAXITER=500 TOL=0.00001 SEED=0
+K-means converged at iteration 12 - Time: 0.36853933334350586
+K-means converged at iteration 12 - Time: 0.3552870750427246
+K-means converged at iteration 12 - Time: 0.3561551570892334
+K-means converged at iteration 12 - Time: 0.3535761833190918
+K-means converged at iteration 12 - Time: 0.356097936630249
+sklearn kmeans: 0.35793113708496094s (5 runs)
 
-Test N=100000 D=256 K=10000 INPUT=N100K_D256.csv MAXITER=500 TOL=0.00001 SEED=0
-K-means converged at iteration 15 - Time: 167.38781023025513
-sklearn kmeans: 167.38781023025513s (1 runs)
+Test N=10000 D=256 K=1000 INPUT=N100K_D256.csv MAXITER=500 TOL=0.00001 SEED=0
+K-means converged at iteration 7 - Time: 0.7142469882965088
+K-means converged at iteration 7 - Time: 0.6906027793884277
+K-means converged at iteration 7 - Time: 0.6788713932037354
+K-means converged at iteration 7 - Time: 0.6738314628601074
+K-means converged at iteration 7 - Time: 0.6789588928222656
+sklearn kmeans: 0.6873023033142089s (5 runs)
+
+Test N=100000 D=2 K=1000 INPUT=N100K_D2.csv MAXITER=500 TOL=0.00001 SEED=0
+K-means converged at iteration 140 - Time: 28.752930641174316
+K-means converged at iteration 140 - Time: 29.547127962112427
+K-means converged at iteration 140 - Time: 29.32025122642517
+K-means converged at iteration 140 - Time: 29.701401233673096
+K-means converged at iteration 140 - Time: 29.738758325576782
+sklearn kmeans: 29.41209387779236s (5 runs)
+
+Test N=100000 D=3 K=1000 INPUT=N100K_D3.csv MAXITER=500 TOL=0.00001 SEED=0
+K-means converged at iteration 101 - Time: 33.60202217102051
+sklearn kmeans: 33.60202217102051s (1 runs)
+
+Test N=100000 D=10 K=1000 INPUT=N100K_D10.csv MAXITER=500 TOL=0.00001 SEED=0
+K-means converged at iteration 81 - Time: 32.24430871009827
+sklearn kmeans: 32.24430871009827s (1 runs)
+
+Test N=100000 D=35 K=1000 INPUT=N100K_D35.csv MAXITER=500 TOL=0.00001 SEED=0
+K-means converged at iteration 85 - Time: 24.302409887313843
+sklearn kmeans: 24.302409887313843s (1 runs)
+
+Test N=100000 D=256 K=1000 INPUT=N100K_D256.csv MAXITER=500 TOL=0.00001 SEED=0
+K-means converged at iteration 36 - Time: 33.892566442489624
+sklearn kmeans: 33.892566442489624s (1 runs)
+
 

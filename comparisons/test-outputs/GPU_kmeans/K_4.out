@@ -79,6 +79,46 @@ K-means converged at iteration 19 - Time: 0.004523
 K-means converged at iteration 19 - Time: 0.004514
 GPU_Kmeans: 0.004531s (5 runs)
 
+Test N=10000 D=2 K=4 INPUT=N100K_D2.csv MAXITER=500 TOL=0.00001 SEED=0
+K-means converged at iteration 27 - Time: 0.002061
+K-means converged at iteration 27 - Time: 0.002031
+K-means converged at iteration 27 - Time: 0.002031
+K-means converged at iteration 27 - Time: 0.002014
+K-means converged at iteration 27 - Time: 0.002032
+GPU_Kmeans: 0.002034s (5 runs)
+
+Test N=10000 D=3 K=4 INPUT=N100K_D3.csv MAXITER=500 TOL=0.00001 SEED=0
+K-means converged at iteration 30 - Time: 0.002758
+K-means converged at iteration 30 - Time: 0.002722
+K-means converged at iteration 30 - Time: 0.002688
+K-means converged at iteration 30 - Time: 0.002686
+K-means converged at iteration 30 - Time: 0.002670
+GPU_Kmeans: 0.002705s (5 runs)
+
+Test N=10000 D=10 K=4 INPUT=N100K_D10.csv MAXITER=500 TOL=0.00001 SEED=0
+K-means converged at iteration 58 - Time: 0.009070
+K-means converged at iteration 58 - Time: 0.009036
+K-means converged at iteration 58 - Time: 0.009004
+K-means converged at iteration 58 - Time: 0.009014
+K-means converged at iteration 58 - Time: 0.009002
+GPU_Kmeans: 0.009025s (5 runs)
+
+Test N=10000 D=35 K=4 INPUT=N100K_D35.csv MAXITER=500 TOL=0.00001 SEED=0
+K-means converged at iteration 149 - Time: 0.070982
+K-means converged at iteration 149 - Time: 0.071311
+K-means converged at iteration 149 - Time: 0.070994
+K-means converged at iteration 149 - Time: 0.070987
+K-means converged at iteration 149 - Time: 0.071034
+GPU_Kmeans: 0.071061s (5 runs)
+
+Test N=10000 D=256 K=4 INPUT=N100K_D256.csv MAXITER=500 TOL=0.00001 SEED=0
+K-means converged at iteration 104 - Time: 0.209561
+K-means converged at iteration 126 - Time: 0.253513
+K-means converged at iteration 126 - Time: 0.253478
+K-means converged at iteration 126 - Time: 0.253512
+K-means converged at iteration 126 - Time: 0.253692
+GPU_Kmeans: 0.244751s (5 runs)
+
 Test N=100000 D=2 K=4 INPUT=N100K_D2.csv MAXITER=500 TOL=0.00001 SEED=0
 K-means converged at iteration 6 - Time: 0.003968
 K-means converged at iteration 6 - Time: 0.003892

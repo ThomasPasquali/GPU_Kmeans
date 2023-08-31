@@ -78,3 +78,48 @@ K-means converged at iteration 6 - Time: 0.571417
 K-means converged at iteration 6 - Time: 0.570937
 K-means converged at iteration 6 - Time: 0.570799
 CPU_Kmeans: 0.571074s (5 runs)
+
+Test N=10000 D=2 K=1000 INPUT=N100K_D2.csv MAXITER=500 TOL=0.00001 SEED=0
+K-means converged at iteration 19 - Time: 3.374979
+K-means converged at iteration 19 - Time: 2.424184
+K-means converged at iteration 19 - Time: 2.184145
+K-means converged at iteration 19 - Time: 2.180675
+K-means converged at iteration 19 - Time: 2.167308
+CPU_Kmeans: 2.466258s (5 runs)
+
+Test N=10000 D=3 K=1000 INPUT=N100K_D3.csv MAXITER=500 TOL=0.00001 SEED=0
+K-means converged at iteration 17 - Time: 2.543701
+K-means converged at iteration 17 - Time: 2.628879
+K-means converged at iteration 17 - Time: 2.567418
+K-means converged at iteration 17 - Time: 2.525662
+K-means converged at iteration 17 - Time: 2.540494
+CPU_Kmeans: 2.561231s (5 runs)
+
+Test N=10000 D=10 K=1000 INPUT=N100K_D10.csv MAXITER=500 TOL=0.00001 SEED=0
+K-means converged at iteration 18 - Time: 7.312320
+K-means converged at iteration 18 - Time: 7.258432
+K-means converged at iteration 18 - Time: 7.266541
+K-means converged at iteration 18 - Time: 7.261518
+K-means converged at iteration 18 - Time: 7.283236
+CPU_Kmeans: 7.276409s (5 runs)
+
+Test N=10000 D=35 K=1000 INPUT=N100K_D35.csv MAXITER=500 TOL=0.00001 SEED=0
+K-means converged at iteration 12 - Time: 15.779867
+K-means converged at iteration 12 - Time: 25.657415
+K-means converged at iteration 12 - Time: 26.130572
+K-means converged at iteration 12 - Time: 26.157062
+K-means converged at iteration 12 - Time: 26.167888
+CPU_Kmeans: 23.978561s (5 runs)
+
+Test N=10000 D=256 K=1000 INPUT=N100K_D256.csv MAXITER=500 TOL=0.00001 SEED=0
+K-means converged at iteration 9 - Time: 102.603672
+CPU_Kmeans: 102.603672s (1 runs)
+
+Test N=100000 D=2 K=1000 INPUT=N100K_D2.csv MAXITER=500 TOL=0.00001 SEED=0
+K-means converged at iteration 235 - Time: 276.447539
+CPU_Kmeans: 276.447539s (1 runs)
+
+Test N=100000 D=3 K=1000 INPUT=N100K_D3.csv MAXITER=500 TOL=0.00001 SEED=0
+K-means converged at iteration 105 - Time: 160.670234
+CPU_Kmeans: 160.670234s (1 runs)
+

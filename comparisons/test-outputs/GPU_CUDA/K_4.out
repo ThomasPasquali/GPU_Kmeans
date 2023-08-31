@@ -79,6 +79,46 @@ Run 3 - Time: 0.032619s
 Run 4 - Time: 0.032602s
 KMCUDA: 0.058485s (5 runs)
 
+Test N=10000 D=2 K=4 INPUT=N100K_D2.csv MAXITER=500 TOL=0.00001 SEED=0
+Run 0 - Time: 0.256346s
+Run 1 - Time: 0.019999s
+Run 2 - Time: 0.019990s
+Run 3 - Time: 0.019982s
+Run 4 - Time: 0.020002s
+KMCUDA: 0.067264s (5 runs)
+
+Test N=10000 D=3 K=4 INPUT=N100K_D3.csv MAXITER=500 TOL=0.00001 SEED=0
+Run 0 - Time: 0.271162s
+Run 1 - Time: 0.143570s
+Run 2 - Time: 0.143583s
+Run 3 - Time: 0.143626s
+Run 4 - Time: 0.143498s
+KMCUDA: 0.169088s (5 runs)
+
+Test N=10000 D=10 K=4 INPUT=N100K_D10.csv MAXITER=500 TOL=0.00001 SEED=0
+Run 0 - Time: 0.264826s
+Run 1 - Time: 0.134533s
+Run 2 - Time: 0.134497s
+Run 3 - Time: 0.134496s
+Run 4 - Time: 0.134476s
+KMCUDA: 0.160565s (5 runs)
+
+Test N=10000 D=35 K=4 INPUT=N100K_D35.csv MAXITER=500 TOL=0.00001 SEED=0
+Run 0 - Time: 0.474944s
+Run 1 - Time: 0.317471s
+Run 2 - Time: 0.317387s
+Run 3 - Time: 0.317374s
+Run 4 - Time: 0.317318s
+KMCUDA: 0.348899s (5 runs)
+
+Test N=10000 D=256 K=4 INPUT=N100K_D256.csv MAXITER=500 TOL=0.00001 SEED=0
+Run 0 - Time: 0.778197s
+Run 1 - Time: 0.627377s
+Run 2 - Time: 0.627514s
+Run 3 - Time: 0.628021s
+Run 4 - Time: 0.627421s
+KMCUDA: 0.657706s (5 runs)
+
 Test N=100000 D=2 K=4 INPUT=N100K_D2.csv MAXITER=500 TOL=0.00001 SEED=0
 Run 0 - Time: 0.194081s
 Run 1 - Time: 0.070391s
